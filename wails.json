@@ -1,0 +1,46 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "StarCore",
+  "outputfilename": "StarCore",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "admin",
+    "email": "vpertj@gmail.com"
+  },
+  "windows": {
+    "main": {
+      "title": "StarCore",
+      "width": 1600,
+      "height": 960,
+      "minWidth": 800,
+      "minHeight": 600,
+      "background": "#11111b",
+      "frameless": true,
+      "resizable": true
+    }
+  },
+  "macos": {
+    "main": {
+      "title": "StarCore",
+      "width": 1600,
+      "height": 960,
+      "minWidth": 800,
+      "minHeight": 600,
+      "background": "#11111b"
+    }
+  },
+  "linux": {
+    "main": {
+      "title": "StarCore",
+      "width": 1600,
+      "height": 960,
+      "minWidth": 800,
+      "minHeight": 600,
+      "background": "#11111b",
+      "frameless": true
+    }
+  }
+}
