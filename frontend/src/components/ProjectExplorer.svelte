@@ -1,4 +1,4 @@
-﻿﻿<script>
+<script>
  import { fade } from 'svelte/transition'
  import { currentProject, fileTree, openFile, createNewFile, createNewFolder, deleteFileOrFolder, renameFileOrFolder } from '../stores/app.js'
  import { t } from '../stores/i18n.js'
@@ -121,42 +121,8 @@
   }
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions a11y_no_noninteractive_element_interactions -->
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
 <div class="h-full flex flex-col" onclick={hideContextMenu} role="region" aria-label="é¡¹ç›®èµ„æºç®¡ç†å™¨">
-  <div class="flex items-center justify-between px-3 py-2 border-b" style="border-color: var(--border);">
-    <h2 class="text-sm font-medium" style="color: var(--text-secondary);">{$t('sidebar.explorer').toUpperCase()}</h2>
-    <button
-      class="p-1 rounded transition-colors"
-      title="Open Folder"
-      style="color: var(--text-secondary);"
-      onclick={openProject}
-      aria-label="æ‰“å¼€æ–‡ä»¶å¤¹"
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
-       </svg>
-     </button>
-     {#if $currentProject}
-       <button
-         class="p-1 rounded transition-colors"
-         title="Analyze Project"
-         style="color: var(--text-secondary);"
-         onclick={analyzeProject}
-         disabled={analyzing}
-       >
-         {#if analyzing}
-           <svg class="w-4 h-4 animate-spin" viewBox="0 0 16 16" fill="none">
-             <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" stroke-dasharray="8 6" />
-           </svg>
-         {:else}
-           <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-           </svg>
-         {/if}
-       </button>
-     {/if}
-   </div>
-
   <div class="flex-1 overflow-y-auto p-2">
     {#if !$currentProject}
       <div class="text-center py-8">
@@ -170,7 +136,7 @@
         </button>
       </div>
     {:else}
-      <div class="font-mono text-sm">
+      <div class="text-sm">
         <div class="px-2 py-1 truncate-text" style="color: var(--text-secondary);" title={$currentProject}>
           {$currentProject}
         </div>

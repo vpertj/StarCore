@@ -2,11 +2,13 @@ import { writable } from 'svelte/store'
 import { KEYS } from './constants.js'
 
 const KEY = KEYS.EDITOR_SETTINGS
+const VERSION_KEY = KEY + '-v'
+const VERSION = 6
 
 const defaults = {
   fontSize: 16,
-  fontFamily: "'Cascadia Code', 'JetBrains Mono', 'Fira Code', 'Consolas', 'monospace'",
-  lineHeight: 1.7,
+  fontFamily: "'Lilex', 'Cascadia Code', 'JetBrains Mono', 'Consolas', 'monospace'",
+  lineHeight: 1.6,
   wordWrap: true,
   showLineNumbers: true,
   showMinimap: false,
@@ -19,19 +21,27 @@ const defaults = {
 }
 
 function load() {
+  const savedVersion = parseInt(localStorage.getItem(VERSION_KEY) || '0', 10)
+  const saved = localStorage.getItem(KEY)
+
+  if (savedVersion < VERSION || !saved) {
+    localStorage.removeItem(KEY)
+    localStorage.setItem(VERSION_KEY, String(VERSION))
+    return { ...defaults }
+  }
+
   try {
-    const saved = localStorage.getItem(KEY)
-    if (saved) {
-      const parsed = JSON.parse(saved)
-      // Migrate old cursorBlink boolean to cursorBlinkStyle string
-      if (typeof parsed.cursorBlink === 'boolean') {
-        parsed.cursorBlinkStyle = parsed.cursorBlink ? 'blink' : 'solid'
-        delete parsed.cursorBlink
-      }
-      return { ...defaults, ...parsed }
+    const parsed = JSON.parse(saved)
+    if (typeof parsed.cursorBlink === 'boolean') {
+      parsed.cursorBlinkStyle = parsed.cursorBlink ? 'blink' : 'solid'
+      delete parsed.cursorBlink
     }
-  } catch {}
-  return { ...defaults }
+    return { ...defaults, ...parsed }
+  } catch {
+    localStorage.removeItem(KEY)
+    localStorage.setItem(VERSION_KEY, String(VERSION))
+    return { ...defaults }
+  }
 }
 
 export const editorSettings = writable(load())

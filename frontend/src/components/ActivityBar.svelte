@@ -43,7 +43,7 @@ async function openFolder() {
     <button
       class="w-10 h-10 flex items-center justify-center rounded transition-colors relative"
       style="color: {isActive(view.id) ? '#ffffff' : 'var(--text-secondary)'}; background-color: {isActive(view.id) ? 'var(--bg-secondary)' : 'transparent'};"
-      on:click={() => handleClick(view.id)}
+      onclick={() => handleClick(view.id)}
       title="{$t(view.labelKey)}{view.shortcut ? ` (${view.shortcut})` : ''}"
     >
       <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -62,7 +62,7 @@ async function openFolder() {
       class="w-10 h-10 flex items-center justify-center rounded transition-colors"
       style="color: #4ec9b0"
       title={$t('openFolder')}
-      on:click={openFolder}
+      onclick={openFolder}
     >
       <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
         <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
@@ -74,7 +74,7 @@ async function openFolder() {
     class="w-10 h-10 flex items-center justify-center rounded transition-colors"
     style="color: var(--text-secondary)"
     title={$t('activitybar.settings')}
-    on:click={() => settingsVisible.set(!$settingsVisible)}
+     onclick={() => settingsVisible.set(!$settingsVisible)}
   >
     <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
       <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />

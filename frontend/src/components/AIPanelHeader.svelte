@@ -46,7 +46,7 @@
         <div class="absolute top-full right-0 mt-1 z-50 rounded shadow-lg overflow-hidden" style="background-color: var(--bg-secondary); border: 1px solid var(--border); width: 280px; max-height: 360px;">
         <div class="flex items-center justify-between px-3 py-2 border-b" style="border-color: var(--border);">
           <span class="text-xs font-medium" style="color: var(--text-primary);">{$t('history.title')}</span>
-          <button class="p-0.5 rounded hover:bg-white/10" style="color: var(--text-secondary);" onclick={() => showHistoryPanel = false}>
+          <button class="p-0.5 rounded hover:bg-white/10" style="color: var(--text-secondary);" onclick={() => showHistoryPanel = false} aria-label="Close history">
             <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>

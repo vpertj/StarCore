@@ -2,8 +2,10 @@
 import { bottomPanelVisible, bottomPanelTab, aiPanelVisible } from './stores/ui.js'
 import { settingsVisible, activeFile, editorGroups } from './stores/app.js'
  import { initCustomModels } from './stores/provider.js'
-import { EventsOn } from '../wailsjs/runtime/runtime.js'
-import { onMount, onDestroy } from 'svelte'
+  import { EventsOn } from '../wailsjs/runtime/runtime.js'
+  import { editorSettings, updateEditorSetting } from './stores/editorSettings.js'
+  import { get } from 'svelte/store'
+  import { onMount, onDestroy } from 'svelte'
 import ActivityBar from './components/ActivityBar.svelte'
 import Sidebar from './components/Sidebar.svelte'
 import Toolbar from './components/Toolbar.svelte'
@@ -16,11 +18,9 @@ import Settings from './components/Settings.svelte'
 import CommandPalette from './components/CommandPalette.svelte'
 import Breadcrumb from './components/Breadcrumb.svelte'
 
-/** @type {boolean} */
-let isSplitDragging = false
+let isSplitDragging = $state(false)
 
-/** @type {number} */
-let splitRatio = 0.5
+let splitRatio = $state(0.5)
 
 /** @param {MouseEvent} e */
 function startSplitResize(e) {
@@ -53,14 +53,23 @@ initCustomModels()
 let showWelcome = $state(false)
 let welcomeUnsub = null
 
-onMount(() => {
-  welcomeUnsub = EventsOn('app:first-run', (data) => {
-    if (data?.needsSetup) showWelcome = true
-  })
-})
+/** @param {WheelEvent} e */
+function handleWheel(e) {
+  if (!e.ctrlKey && !e.metaKey) return
+  e.preventDefault()
+  const el = document.activeElement
+  const editorArea = el?.closest('.editor-pane, .cm-editor, .cm-content, .editor-content')
+  if (editorArea) {
+    const settings = get(editorSettings)
+    const delta = e.deltaY > 0 ? -1 : 1
+    const next = Math.max(8, Math.min(32, settings.fontSize + delta))
+    updateEditorSetting('fontSize', next)
+  }
+}
 
 onDestroy(() => {
   if (welcomeUnsub) { welcomeUnsub(); welcomeUnsub = null }
+  document.removeEventListener('wheel', handleWheel)
 })
 </script>
 
@@ -83,7 +92,7 @@ onDestroy(() => {
           </div>
 
           {#if hasSplit}
-            <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions a11y-no-noninteractive-element-interactions -->
+            <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
             <div
               class="split-divider"
               class:active={isSplitDragging}

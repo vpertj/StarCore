@@ -86,6 +86,7 @@
       <span
         class="tab-close"
         onclick={(e) => handleClose(e, file.path)}
+        onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleClose(e, file.path); }}
         role="button"
         tabindex="0"
         aria-label="Close tab"

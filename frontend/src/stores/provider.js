@@ -3,7 +3,7 @@ import { KEYS } from './constants.js'
 import { LoadCustomModels, SaveCustomModels } from '../../wailsjs/go/main/App.js'
 
 /** @typedef {{ id: string, name: string, endpoint?: string, enabled?: boolean, isDefault?: boolean }} Provider */
-/** @typedef {{ id: string, name: string, providerId: string, providerName?: string, supportsThinking?: boolean, enabled?: boolean, isCustom?: boolean, apiKey?: string, modelId?: string }} Model */
+/** @typedef {{ id: string, name: string, providerId: string, providerName?: string, supportsThinking?: boolean, enabled?: boolean, isCustom?: boolean, apiKey?: string, modelId?: string, endpoint?: string, maxTokens?: number, contextWindow?: number }} Model */
 
 export const providers = writable(/** @type {Provider[]} */ ([]))
 
@@ -71,8 +71,8 @@ export const builtinProviders = [
   { id: 'custom', name: '自定义 (OpenAI 兼容)', defaultEndpoint: '' },
 ]
 
-/** @type {Record<string, Array<{ id: string, name: string, supportsThinking?: boolean }>>} */
-export const providerModels = /** @type {Record<string, Array<{ id: string, name: string, supportsThinking?: boolean }>>} */ ({
+/** @type {Record<string, Array<{ id: string, name: string, supportsThinking?: boolean, maxTokens?: number }>>} */
+export const providerModels = /** @type {Record<string, Array<{ id: string, name: string, supportsThinking?: boolean, maxTokens?: number }>>} */ ({
   openai: [],
   anthropic: [],
   deepseek: [],

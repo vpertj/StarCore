@@ -1,6 +1,6 @@
 <script>
  import { onMount, onDestroy } from 'svelte'
- import { EditorState } from '@codemirror/state'
+  import { EditorState, Compartment } from '@codemirror/state'
  import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, WidgetType, Decoration, drawSelection } from '@codemirror/view'
  import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
  import { syntaxHighlighting, defaultHighlightStyle, HighlightStyle } from '@codemirror/language'
@@ -30,9 +30,11 @@
  import { debouncedRequestCompletion, requestCompletion, dismissCompletion, cancelPendingCompletion, completionVisible, completionLoading, completionText, completionConfig } from '../stores/completion.js'
  import { activeFileContent, selectedCode } from '../stores/ai.js'
  import { diagnostics as diagnosticsStore, activeFileDiagnostics } from '../stores/diagnostics.js'
+ import { currentTheme, getThemeById } from '../stores/theme.js'
 
   /** @type {HTMLDivElement} */ let editorContainer
   /** @type {EditorView|null} */ let view = null
+  const highlightCompartment = new Compartment
   let content = $state('')
   let isDirty = $state(false)
  let lspChangeTimer = null
@@ -40,6 +42,7 @@
   /** @type {(() => void)|null} */ let completionUnsubscribe = null
   /** @type {(() => void)|null} */ let activeFileUnsubscribe = null
   /** @type {(() => void)|null} */ let settingsUnsubscribe = null
+  /** @type {(() => void)|null} */ let themeUnsub = null
   /** @type {(() => void)|null} */ let fileChangeUnsubscribe = null
  let lspDiagUnsubscribe = null
   let mounted = false
@@ -144,106 +147,46 @@
    provide: f => EditorView.decorations.from(f)
  })
 
- const highlightThemes = {
-    'one-dark': HighlightStyle.define([
-      { tag: tags.keyword, color: '#c678dd' },
-      { tag: [ tags.name, tags.deleted, tags.character, tags.macroName ], color: '#e06c75' },
-      { tag: [ tags.propertyName ], color: '#e06c75' },
-      { tag: [ tags.processingInstruction, tags.string, tags.inserted, tags.special(tags.string) ], color: '#98c379' },
-      { tag: [ tags.function(tags.variableName), tags.labelName ], color: '#61afef' },
-      { tag: [ tags.color, tags.constant(tags.name), tags.standard(tags.name) ], color: '#d19a66' },
-      { tag: [ tags.definition(tags.name), tags.separator ], color: '#abb2bf' },
-      { tag: [ tags.typeName ], color: '#e5c07b' },
-      { tag: [ tags.className ], color: '#e5c07b' },
-      { tag: [ tags.number, tags.changed, tags.annotation, tags.modifier, tags.self, tags.namespace ], color: '#d19a66' },
-      { tag: [ tags.operator, tags.operatorKeyword, tags.url, tags.escape, tags.regexp, tags.link, tags.special(tags.string) ], color: '#56b6c2' },
-      { tag: [ tags.meta, tags.comment ], color: '#5c6370', fontStyle: 'italic' },
-      { tag: tags.strong, fontWeight: 'bold' },
-      { tag: tags.emphasis, fontStyle: 'italic' },
-      { tag: tags.heading, fontWeight: 'bold', color: '#c678dd' },
-      { tag: [ tags.atom, tags.bool, tags.special(tags.variableName) ], color: '#d19a66' },
-      { tag: tags.invalid, color: '#f44747' },
-    ]),
-    'dracula': HighlightStyle.define([
-      { tag: tags.keyword, color: '#ff79c6' },
-      { tag: [ tags.name, tags.deleted, tags.character, tags.macroName ], color: '#ff5555' },
-      { tag: [ tags.propertyName ], color: '#50fa7b' },
-      { tag: [ tags.processingInstruction, tags.string, tags.inserted, tags.special(tags.string) ], color: '#f1fa8c' },
-      { tag: [ tags.function(tags.variableName), tags.labelName ], color: '#50fa7b' },
-      { tag: [ tags.color, tags.constant(tags.name), tags.standard(tags.name) ], color: '#bd93f9' },
-      { tag: [ tags.definition(tags.name), tags.separator ], color: '#f8f8f2' },
-      { tag: [ tags.typeName ], color: '#8be9fd' },
-      { tag: [ tags.className ], color: '#8be9fd' },
-      { tag: [ tags.number, tags.changed, tags.annotation, tags.modifier, tags.self, tags.namespace ], color: '#bd93f9' },
-      { tag: [ tags.operator, tags.operatorKeyword, tags.url, tags.escape, tags.regexp, tags.link, tags.special(tags.string) ], color: '#ff79c6' },
-      { tag: [ tags.meta, tags.comment ], color: '#6272a4', fontStyle: 'italic' },
-      { tag: tags.strong, fontWeight: 'bold' },
-      { tag: tags.emphasis, fontStyle: 'italic' },
-      { tag: tags.heading, fontWeight: 'bold', color: '#ff79c6' },
-      { tag: [ tags.atom, tags.bool, tags.special(tags.variableName) ], color: '#bd93f9' },
-      { tag: tags.invalid, color: '#ff5555' },
-    ]),
-    'monokai': HighlightStyle.define([
-      { tag: tags.keyword, color: '#f92672' },
-      { tag: [ tags.name, tags.deleted, tags.character, tags.macroName ], color: '#f92672' },
-      { tag: [ tags.propertyName ], color: '#a6e22e' },
-      { tag: [ tags.processingInstruction, tags.string, tags.inserted, tags.special(tags.string) ], color: '#e6db74' },
-      { tag: [ tags.function(tags.variableName), tags.labelName ], color: '#a6e22e' },
-      { tag: [ tags.color, tags.constant(tags.name), tags.standard(tags.name) ], color: '#ae81ff' },
-      { tag: [ tags.definition(tags.name), tags.separator ], color: '#f8f8f2' },
-      { tag: [ tags.typeName ], color: '#66d9ef' },
-      { tag: [ tags.className ], color: '#66d9ef' },
-      { tag: [ tags.number, tags.changed, tags.annotation, tags.modifier, tags.self, tags.namespace ], color: '#ae81ff' },
-      { tag: [ tags.operator, tags.operatorKeyword, tags.url, tags.escape, tags.regexp, tags.link, tags.special(tags.string) ], color: '#f92672' },
-      { tag: [ tags.meta, tags.comment ], color: '#75715e' },
-      { tag: tags.strong, fontWeight: 'bold' },
-      { tag: tags.emphasis, fontStyle: 'italic' },
-      { tag: tags.heading, fontWeight: 'bold', color: '#f92672' },
-      { tag: [ tags.atom, tags.bool, tags.special(tags.variableName) ], color: '#ae81ff' },
-      { tag: tags.invalid, color: '#f92672' },
-    ]),
-    'github': HighlightStyle.define([
-      { tag: tags.keyword, color: '#d73a49' },
-      { tag: [ tags.name, tags.deleted, tags.character, tags.macroName ], color: '#d73a49' },
-      { tag: [ tags.propertyName ], color: '#005cc5' },
-      { tag: [ tags.processingInstruction, tags.string, tags.inserted, tags.special(tags.string) ], color: '#032f62' },
-      { tag: [ tags.function(tags.variableName), tags.labelName ], color: '#6f42c1' },
-      { tag: [ tags.color, tags.constant(tags.name), tags.standard(tags.name) ], color: '#005cc5' },
-      { tag: [ tags.definition(tags.name), tags.separator ], color: '#24292e' },
-      { tag: [ tags.typeName ], color: '#6f42c1' },
-      { tag: [ tags.className ], color: '#6f42c1' },
-      { tag: [ tags.number, tags.changed, tags.annotation, tags.modifier, tags.self, tags.namespace ], color: '#005cc5' },
-      { tag: [ tags.operator, tags.operatorKeyword, tags.url, tags.escape, tags.regexp, tags.link, tags.special(tags.string) ], color: '#d73a49' },
-      { tag: [ tags.meta, tags.comment ], color: '#6a737d', fontStyle: 'italic' },
-      { tag: tags.strong, fontWeight: 'bold' },
-      { tag: tags.emphasis, fontStyle: 'italic' },
-      { tag: tags.heading, fontWeight: 'bold', color: '#d73a49' },
-      { tag: [ tags.atom, tags.bool, tags.special(tags.variableName) ], color: '#005cc5' },
-      { tag: tags.invalid, color: '#d73a49' },
-    ]),
-    'nord': HighlightStyle.define([
-      { tag: tags.keyword, color: '#81a1c1' },
-      { tag: [ tags.name, tags.deleted, tags.character, tags.macroName ], color: '#bf616a' },
-      { tag: [ tags.propertyName ], color: '#d8dee9' },
-      { tag: [ tags.processingInstruction, tags.string, tags.inserted, tags.special(tags.string) ], color: '#a3be8c' },
-      { tag: [ tags.function(tags.variableName), tags.labelName ], color: '#88c0d0' },
-      { tag: [ tags.color, tags.constant(tags.name), tags.standard(tags.name) ], color: '#b48ead' },
-      { tag: [ tags.definition(tags.name), tags.separator ], color: '#d8dee9' },
-      { tag: [ tags.typeName ], color: '#ebcb8b' },
-      { tag: [ tags.className ], color: '#ebcb8b' },
-      { tag: [ tags.number, tags.changed, tags.annotation, tags.modifier, tags.self, tags.namespace ], color: '#b48ead' },
-      { tag: [ tags.operator, tags.operatorKeyword, tags.url, tags.escape, tags.regexp, tags.link, tags.special(tags.string) ], color: '#81a1c1' },
-      { tag: [ tags.meta, tags.comment ], color: '#616e88', fontStyle: 'italic' },
-      { tag: tags.strong, fontWeight: 'bold' },
-      { tag: tags.emphasis, fontStyle: 'italic' },
-      { tag: tags.heading, fontWeight: 'bold', color: '#81a1c1' },
-      { tag: [ tags.atom, tags.bool, tags.special(tags.variableName) ], color: '#b48ead' },
-      { tag: tags.invalid, color: '#bf616a' },
-    ]),
+  const TAG_LOOKUP = {
+    keyword: tags.keyword, string: tags.string, number: tags.number,
+    comment: tags.comment, variableName: tags.variableName, typeName: tags.typeName,
+    functionName: tags.functionName, operator: tags.operator, builtin: tags.builtin,
+    bracket: tags.bracket, name: tags.name, propertyName: tags.propertyName,
+    labelName: tags.labelName, separator: tags.separator, className: tags.className,
+    'definition(name)': tags.definition(tags.name),
+    'function(variableName)': tags.function(tags.variableName),
+    'special(string)': tags.special(tags.string),
+    'special(variableName)': tags.special(tags.variableName),
+    macroName: tags.macroName, character: tags.character, deleted: tags.deleted,
+    inserted: tags.inserted, changed: tags.changed, invalid: tags.invalid,
+    meta: tags.meta, heading: tags.heading, link: tags.link, strong: tags.strong,
+    emphasis: tags.emphasis, strikethrough: tags.strikethrough, url: tags.url,
+    escape: tags.escape, regexp: tags.regexp, annotation: tags.annotation,
+    modifier: tags.modifier, namespace: tags.namespace, atom: tags.atom, bool: tags.bool,
+    'constant(name)': tags.constant(tags.name),
+    'standard(name)': tags.standard(tags.name),
+    operatorKeyword: tags.operatorKeyword, self: tags.self,
+    processingInstruction: tags.processingInstruction, color: tags.color,
   }
 
-  function getHighlightExtension(themeName) {
-    return syntaxHighlighting(highlightThemes[themeName] || highlightThemes['one-dark'])
+  function resolveTag(name) {
+    return TAG_LOOKUP[name] || null
+  }
+
+  function getHighlightExtension(themeId) {
+    const theme = getThemeById(themeId)
+    if (!theme || !theme.syntax) return syntaxHighlighting(defaultHighlightStyle)
+    const specs = theme.syntax.map(entry => {
+      const tagNames = Array.isArray(entry.tag) ? entry.tag : [entry.tag]
+      const resolved = tagNames.map(n => resolveTag(n)).filter(Boolean)
+      if (resolved.length === 0) return null
+      const spec = { tag: resolved.length === 1 ? resolved[0] : resolved }
+      if (entry.color) spec.color = entry.color
+      if (entry.fontStyle) spec.fontStyle = entry.fontStyle
+      if (entry.fontWeight) spec.fontWeight = entry.fontWeight
+      return spec
+    }).filter(Boolean)
+    return syntaxHighlighting(HighlightStyle.define(specs))
   }
 
   function getLanguageExtension(path) {
@@ -379,7 +322,7 @@
          }
        }
      ]),
-     getHighlightExtension(getStoreValue(editorSettings).highlightTheme),
+       highlightCompartment.of(getHighlightExtension(getStoreValue(currentTheme))),
      EditorView.updateListener.of((update) => {
        if (update.docChanged) {
          content = update.state.doc.toString()
@@ -635,22 +578,8 @@
     // End onFileChanged
 
     // Apply editor settings changes directly to DOM (fast, no re-init needed)
-    let prevHighlight = getStoreValue(editorSettings).highlightTheme
     settingsUnsubscribe = editorSettings.subscribe(settings => {
       if (!view) return
-      // Highlight theme change requires editor rebuild
-      if (settings.highlightTheme !== prevHighlight) {
-        prevHighlight = settings.highlightTheme
-        const pos = view.state.selection.main.head
-        if (lastFilePath) {
-          initEditor(lastFilePath)
-          requestAnimationFrame(() => {
-            if (view && pos <= view.state.doc.length) view.dispatch({ selection: { anchor: pos } })
-          })
-        }
-        return
-      }
-      // Font settings
       const contentEl = view.dom.querySelector('.cm-content')
       const gutterEl = view.dom.querySelector('.cm-gutters')
       if (contentEl) {
@@ -664,6 +593,16 @@
       }
       // Cursor settings - target drawSelection's cursor layer
       applyCursorSettings(view, settings)
+    })
+
+    // Update highlight when theme changes
+    let prevThemeId = getStoreValue(currentTheme)
+    const themeUnsub = currentTheme.subscribe(themeId => {
+      if (!view || themeId === prevThemeId) return
+      prevThemeId = themeId
+      view.dispatch({
+        effects: highlightCompartment.reconfigure(getHighlightExtension(themeId))
+      })
     })
   })
 
@@ -688,6 +627,10 @@
     if (completionUnsubscribe) {
       completionUnsubscribe()
       completionUnsubscribe = null
+    }
+    if (themeUnsub) {
+      themeUnsub()
+      themeUnsub = null
     }
     if (view) {
       view.destroy()
@@ -748,6 +691,10 @@
     class="flex-1 overflow-hidden"
     style="background-color: var(--bg-primary);"
     onclick={() => { view?.focus(); const ce = view?.dom.querySelector('.cm-content'); if (ce) ce.focus() }}
+    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { view?.focus(); const ce = view?.dom.querySelector('.cm-content'); if (ce) ce.focus() }}}
+    role="button"
+    tabindex="0"
+    aria-label="Focus editor"
   ></div>
 </div>
 

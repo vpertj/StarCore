@@ -1,18 +1,18 @@
-﻿<script>
+<script>
  import { onMount } from 'svelte'
- import { fade, fly, scale } from 'svelte/transition'
+ import { fade, fly } from 'svelte/transition'
  import { aiPanelVisible, aiPanelWidth } from '../stores/ui.js'
  import AIPanelHeader from './AIPanelHeader.svelte'
  import ContextPreview from './ContextPreview.svelte'
  import DiffViewer from './DiffViewer.svelte'
  import { pendingDiff, diffVisible, applyDiff, dismissDiff, showDiffForFile } from '../stores/diffPreview.js'
- import { messages, isGenerating, sendMessage, addMessage, clearMessages, thinkingContent, contextFiles, contextCode, stopGenerating, toolCalls, approveToolCall, rejectToolCall, selectedCode, activeFileContent, detectTaskType, classifyError, retryLastMessage, connectionStatus } from '../stores/ai.js'
+ import { messages, isGenerating, sendMessage, addMessage, clearMessages, thinkingContent, contextFiles, contextCode, stopGenerating, toolCalls, approveToolCall, rejectToolCall, selectedCode, activeFileContent, detectTaskType, classifyError, retryLastMessage } from '../stores/ai.js'
  import { skills, executeSkill, isSkillExecuting, skillResult, executingSkillId, clearSkillResult, loadSkills } from '../stores/skill.js'
  import { activeProviderId, activeModelId, allAvailableModels, builtinProviders, loadModels } from '../stores/provider.js'
  import { activeAgentId, agents, loadAgents } from '../stores/agent.js'
  import { aiMode } from '../stores/ai.js'
  import { masterMode } from '../stores/masterMode.js'
- import { loadMessages, deleteConversation } from '../stores/memory.js'
+
  import { currentProject, fileTree, activeFile } from '../stores/app.js'
 import { activeFileDiagnostics } from '../stores/diagnostics.js'
  import { t } from '../stores/i18n.js'
@@ -23,21 +23,21 @@ import { activeFileDiagnostics } from '../stores/diagnostics.js'
  let showSkillHint = false
  let showFilePicker = false
  let filePickerQuery = ''
- let showThinking = false
+
  let showAgentDropdown = false
  let showModelDropdown = false
- let toolExpanded = {}
+ /** @type {Record<string, boolean>} */ let toolExpanded = {}
  let showModeDropdown = false
  let dropdownLeft = 0
  let dropdownBottom = 0
  let dropdownWidth = 300
  /** @type {HTMLElement|null} */ let inputAreaEl = null
- let textareaEl = null
+ /** @type {HTMLTextAreaElement|null} */ let textareaEl = null
  let focusedSkillIndex = 0
  let focusedFileIndex = 0
- let currentSkill = null  // { id, name, icon } of selected skill
+ /** @type {{id: string, name: string, icon: string}|null} */ let currentSkill = null
  let showDone = false
- let doneTimeout = null
+ /** @type {ReturnType<typeof setTimeout>|null} */ let doneTimeout = null
 
  function updateDropdownPos() {
    const el = inputAreaEl || document.querySelector('.ai-panel-input')
@@ -79,26 +79,31 @@ import { activeFileDiagnostics } from '../stores/diagnostics.js'
  $: displayProviderName = activeModel?.providerName || builtinProviders.find(p => p.id === activeModel?.providerId)?.name || activeModel?.providerId || ''
  $: allModels = $allAvailableModels.filter(m => m.enabled !== false)
 
- function buildSkillContext(userInput) {
-   return {
-     selectedCode: $selectedCode || $activeFileContent || '',
-     filePath: $activeFile || '',
-     fileContent: $activeFileContent || $selectedCode || '',
-     diagnostics: [],
-     language: $activeFile ? $activeFile.split('.').pop() || '' : '',
-     projectPath: $currentProject || '',
-     userInput: userInput || '',
-   }
- }
+ /** @param {string} userInput */
+function buildSkillContext(userInput) {
+  return {
+    selectedCode: $selectedCode || $activeFileContent || '',
+    filePath: $activeFile || '',
+    fileContent: $activeFileContent || $selectedCode || '',
+    diagnostics: [],
+    language: $activeFile ? $activeFile.split('.').pop() || '' : '',
+    projectPath: $currentProject || '',
+    userInput: userInput || '',
+  }
+}
 
- function selectAgent(agent) { activeAgentId.set(agent.id); showAgentDropdown = false }
- function selectModel(model) { activeModelId.set(model.id); if (model.providerId && model.providerId !== $activeProviderId) { activeProviderId.set(model.providerId); loadModels() } showModelDropdown = false }
- function setMode(mode) { aiMode.set(mode); showModeDropdown = false }
- function closeDropdowns(e) { if (!e.target.closest('.dropdown-trigger')) { showAgentDropdown = false; showModelDropdown = false; showModeDropdown = false } }
+ /** @param {{id: string}} agent */
+function selectAgent(agent) { activeAgentId.set(agent.id); showAgentDropdown = false }
+/** @param {{id: string, providerId?: string}} model */
+function selectModel(model) { activeModelId.set(model.id); if (model.providerId && model.providerId !== $activeProviderId) { activeProviderId.set(model.providerId); loadModels() } showModelDropdown = false }
+/** @param {string} mode */
+function setMode(mode) { aiMode.set(mode); showModeDropdown = false }
+/** @param {MouseEvent} e */
+function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.target); if (target && !target.closest('.dropdown-trigger')) { showAgentDropdown = false; showModelDropdown = false; showModeDropdown = false } }
 
- onMount(async () => {
-    await loadAgents()
-    await loadSkills()
+ onMount(() => {
+    loadAgents()
+    loadSkills()
     window.addEventListener('skill-trigger', /** @type {EventListener} */ (handleSkillTrigger))
     window.addEventListener('apply-code', /** @type {EventListener} */ (handleApplyCode))
     return () => {
@@ -211,7 +216,6 @@ import { activeFileDiagnostics } from '../stores/diagnostics.js'
  function handleKeyDown(e) {
    // Check if dropdowns are visible in the DOM (more reliable than state variable)
    const skillDropdown = document.querySelector('.skill-dropdown-menu')
-   const fileDropdown = document.querySelector('.file-dropdown-menu')
 
    // Skill dropdown navigation
    if (skillDropdown && showSkillHint) {
@@ -235,7 +239,7 @@ import { activeFileDiagnostics } from '../stores/diagnostics.js'
        inputValue = ''
        showSkillHint = false
        focusedSkillIndex = 0
-       setTimeout(() => e.target?.focus(), 50)
+       setTimeout(() => { const target = /** @type {HTMLElement} */ (e.target); target?.focus(); }, 50)
        return
      }
      if (e.key === 'Escape') {
@@ -347,16 +351,6 @@ import { activeFileDiagnostics } from '../stores/diagnostics.js'
    return div.innerHTML
  }
 
- /** @param {string} id */
- function handleDeleteConversation(id) {
-   deleteConversation(id)
- }
-
- /** @param {string} id */
- function handleLoadConversation(id) {
-   loadMessages(id)
- }
-
  /** @param {number} index */
  function removeContextFile(index) {
    contextFiles.update(files => files.filter((_, i) => i !== index))
@@ -453,30 +447,31 @@ import { activeFileDiagnostics } from '../stores/diagnostics.js'
 
  // Refocus textarea when generation ends (textarea is disabled during generation)
  $: if (!$isGenerating && !$isSkillExecuting && textareaEl) {
-   setTimeout(() => textareaEl.focus(), 50)
+   setTimeout(() => textareaEl?.focus(), 50)
  }
 
  // Show "done" indicator briefly after generation, hide on new activity
  $: if (!$isGenerating && !$isSkillExecuting && $messages.length > 0) {
    if (!showDone) {
      showDone = true
-     clearTimeout(doneTimeout)
+     if (doneTimeout) clearTimeout(doneTimeout)
      doneTimeout = setTimeout(() => showDone = false, 4000)
    }
  }
  $: if ($isGenerating || $isSkillExecuting) {
    showDone = false
-   clearTimeout(doneTimeout)
+   if (doneTimeout) clearTimeout(doneTimeout)
  }
  $: if (inputValue) {
    showDone = false
-   clearTimeout(doneTimeout)
+   if (doneTimeout) clearTimeout(doneTimeout)
  }
 </script>
 
 <svelte:window onclick={closeDropdowns} />
 
 {#if $aiPanelVisible}
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
   <div
     role="separator"
     aria-orientation="vertical"
@@ -492,10 +487,11 @@ import { activeFileDiagnostics } from '../stores/diagnostics.js'
       contextFiles={$contextFiles}
       contextCode={$contextCode}
       {diagnostics}
-      onremovefile={(e) => removeContextFile(e.detail.index)}
+      onremovefile={removeContextFile}
       onremovecode={removeContextCode}
     />
 
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
     <div
       bind:this={messagesContainer}
       class="flex-1 p-3"
@@ -550,6 +546,7 @@ import { activeFileDiagnostics } from '../stores/diagnostics.js'
                 {@const lines = tc.result.split('\n').filter(l => l)}
                 {@const summary = tc.name + ': ' + (lines.length > 1 ? lines[0].slice(0, 50) + '... (' + lines.length + ' lines)' : tc.result.slice(0, 70))}
                 {@const expanded = toolExpanded[tc.id] || false}
+                <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
                 <div class="mt-1 text-xs cursor-pointer" style="color: var(--text-muted);" onclick={() => toolExpanded[tc.id] = !expanded}>
                   <span class="truncate">{summary}</span>
                   {#if expanded}
@@ -677,16 +674,19 @@ import { activeFileDiagnostics } from '../stores/diagnostics.js'
           </div>
         {/if}
 
-        {#if $diffVisible && $pendingDiff}
+        {@const diff = /** @type {{filePath: string, hunks: any[]}|null} */ ($pendingDiff)}
+        {#if $diffVisible && diff}
+          {@const diffHunks = diff.hunks}
+          {@const diffFilePath = diff.filePath}
           <div class="mt-4" in:fade>
             <div class="flex items-center justify-between mb-2">
               <span class="text-xs font-medium" style="color: #e06c75;">Diff Preview</span>
               <div class="flex gap-1">
-                <button class="btn btn-success btn-sm" onclick={() => applyDiff($pendingDiff.filePath, $pendingDiff.hunks)}>Apply</button>
+                <button class="btn btn-success btn-sm" onclick={() => applyDiff(diffFilePath, diffHunks)}>Apply</button>
                 <button class="btn btn-ghost btn-sm" onclick={dismissDiff}>Dismiss</button>
               </div>
             </div>
-            <DiffViewer hunks={$pendingDiff.hunks} filePath={$pendingDiff.filePath} />
+            <DiffViewer hunks={diffHunks} filePath={diffFilePath} />
           </div>
         {/if}
 
@@ -844,8 +844,8 @@ import { activeFileDiagnostics } from '../stores/diagnostics.js'
             disabled={$isGenerating}
             onkeydown={handleKeyDown}
             onkeyup={handleInputKeyup}
-            onfocus={(e) => { e.currentTarget.parentElement.style.borderColor = 'var(--border-focus)'; }}
-            onblur={(e) => { e.currentTarget.parentElement.style.borderColor = 'var(--border)'; }}
+            onfocus={(e) => { const parent = e.currentTarget.parentElement; if (parent) parent.style.borderColor = 'var(--border-focus)'; }}
+            onblur={(e) => { const parent = e.currentTarget.parentElement; if (parent) parent.style.borderColor = 'var(--border)'; }}
           ></textarea>
         </div>
 
@@ -889,7 +889,7 @@ import { activeFileDiagnostics } from '../stores/diagnostics.js'
                 <button
                   class="dropdown-item"
                   style="background-color: {i === focusedSkillIndex ? 'var(--bg-hover)' : 'transparent'};"
-                  onclick={() => { currentSkill = { id: sk.id, name: sk.name, icon: sk.icon }; inputValue = ''; showSkillHint = false; focusedSkillIndex = 0; setTimeout(() => document.querySelector('.ai-panel-input textarea')?.focus(), 50) }}
+                  onclick={() => { currentSkill = { id: sk.id, name: sk.name, icon: sk.icon }; inputValue = ''; showSkillHint = false; focusedSkillIndex = 0; setTimeout(() => { const el = document.querySelector('.ai-panel-input textarea'); if (el) /** @type {HTMLElement} */ (el).focus(); }, 50) }}
                 >
                   <span>{sk.icon}</span>
                   <span class="font-medium">{sk.name}</span>

@@ -49,7 +49,7 @@
               <button
                 class="px-2 py-0.5 rounded text-xs transition-colors"
                 style="background-color: {server.enabled ? '#d73a4933' : '#2ea04333'}; color: {server.enabled ? '#d73a49' : '#2ea043'};"
-                on:click={() => toggleServer(server.id)}
+                onclick={() => toggleServer(server.id)}
               >
                 {server.enabled ? 'Stop' : 'Start'}
               </button>

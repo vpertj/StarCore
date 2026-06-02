@@ -3,16 +3,18 @@
 /** @type {string} */ export let contextCode = ''
 /** @type {string[]} */ export let diagnostics = []
 
-import { createEventDispatcher } from 'svelte'
-const dispatch = createEventDispatcher()
+/** @type {(index: number) => void} */
+export let onremovefile = () => {}
+/** @type {() => void} */
+export let onremovecode = () => {}
 
 /** @param {number} index */
 function removeFile(index) {
-  dispatch('removefile', { index })
+  onremovefile(index)
 }
 
 function removeCode() {
-  dispatch('removecode')
+  onremovecode()
 }
 </script>
 

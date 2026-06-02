@@ -18,8 +18,8 @@ func main() {
 	// Create application with options
 	err := wails.Run(&options.App{
 		Title:     "StarCore",
-		Width:     1600,
-		Height:    960,
+		Width:     1800,
+		Height:    1050,
 		Frameless: true,
 		AssetServer: &assetserver.Options{
 			Assets: assets,

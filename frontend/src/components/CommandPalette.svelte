@@ -119,8 +119,10 @@ $: if ($commandPaletteOpen) {
   }
 }} />
 
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
 {#if $commandPaletteOpen}
   <div class="dialog-backdrop justify-center" style="padding-top: 15vh; align-items: flex-start;" transition:fade={{ duration: 100 }} onclick={(e) => { if (e.target === e.currentTarget) commandPaletteOpen.set(false); }}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="dialog-content w-full max-w-lg overflow-hidden" transition:fly={{ y: -16, duration: 150 }} onkeydown={handleKeydown}>
       <div class="flex items-center px-4 border-b" style="border-color: var(--border);">
         <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: var(--text-muted);">

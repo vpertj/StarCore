@@ -10,9 +10,9 @@
   let { terminalId } = $props()
 
   function getTerminalTheme(themeId) {
-    const t = themes.find(th => th.id === (themeId || 'dark')) || themes[0]
+    const t = themes.find(th => th.id === themeId) || themes[0]
     const c = t.colors
-    const isLight = themeId === 'light'
+    const isLight = t.type === 'light'
     return {
       background: c.bg,
       foreground: c.text,
@@ -81,7 +81,7 @@
   onMount(async () => {
     term = new Terminal({
       fontSize: 14,
-      fontFamily: "'Cascadia Code', 'JetBrains Mono', 'Fira Code', 'Consolas', 'Courier New', monospace",
+      fontFamily: "'Lilex', 'Cascadia Code', 'JetBrains Mono', 'Consolas', monospace",
       fontWeight: 'normal',
       fontWeightBold: 'bold',
       lineHeight: 1.15,

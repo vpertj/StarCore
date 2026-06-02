@@ -1,6 +1,8 @@
 <script>
   import { loadDirectoryContents } from '../stores/app.js'
   import TreeNode from './TreeNode.svelte'
+  import { getFileIcon, FILE_ICONS, getIconColor, getFolderColor } from '../themes/icons.js'
+  import { currentTheme, iconTheme, getThemeColors } from '../stores/theme.js'
 
   let { item, depth = 0, expandedDirs, onToggle, onFileClick, onContextMenu } = $props()
 
@@ -28,6 +30,24 @@
   function isExpanded(path) {
     return expandedDirs.has(path)
   }
+
+  function getIcon() {
+    const it = $iconTheme
+    const tc = getThemeColors($currentTheme ?? 'one-dark')
+    if (item.isDir) {
+      const open = isExpanded(item.path)
+      const f = FILE_ICONS.folder
+      return {
+        path: f.path,
+        color: open ? getFolderColor(it, tc, true) : getFolderColor(it, tc, false),
+        open
+      }
+    }
+    const iconName = getFileIcon(item.name, false)
+    const icon = FILE_ICONS[iconName] || FILE_ICONS.default
+    return { path: icon.path, color: getIconColor(iconName, it, tc), open: false }
+  }
+
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
@@ -51,20 +71,19 @@
     </div>
     <svg class="tree-icon" viewBox="0 0 16 16">
       {#if isExpanded(item.path)}
-        <path d="M1.5 2.5h5.5l1.5 1.5h5.5v9h-12.5z" fill="#dcb67a" opacity="0.8"/>
-        <path d="M1.5 5h12.5v8h-12.5z" fill="#dcb67a"/>
+        <path d={getIcon().path} fill={getIcon().color} opacity="0.8"/>
+        <path d="M1.5 5h12.5v8h-12.5z" fill={getIcon().color}/>
       {:else}
-        <path d="M1.5 2.5h5.5l1.5 1.5h5.5v9h-12.5z" fill="#dcb67a" opacity="0.6"/>
+        <path d={getIcon().path} fill={getIcon().color} opacity="0.6"/>
       {/if}
     </svg>
   {:else}
     <span class="tree-chevron-spacer"></span>
     <svg class="tree-icon" viewBox="0 0 16 16">
-      <path d="M3 1.5h6.5a1 1 0 01.7.3l2.5 2.5a1 1 0 01.3.7v9.5a1 1 0 01-1 1h-8.5a1 1 0 01-1-1v-12a1 1 0 011-1z" fill="none" stroke="currentColor" stroke-width="1"/>
-      <path d="M9.5 1.5v3h3" fill="none" stroke="currentColor" stroke-width="1"/>
+      <path d={getIcon().path} fill={getIcon().color}/>
     </svg>
   {/if}
-  <span class="tree-label" style="color: {item.isDir ? 'var(--text-primary)' : '#6a9955'};" title={item.name}>
+  <span class="tree-label">
     {#if loading}
       {item.name}...
     {:else}
@@ -83,8 +102,8 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 1px 8px 1px 4px;
-  height: 22px;
+  padding: 2px 8px 2px 4px;
+  min-height: 28px;
   cursor: pointer;
   color: var(--text-primary);
   border-radius: 3px;
@@ -120,7 +139,6 @@
   width: 16px;
   height: 16px;
   flex-shrink: 0;
-  color: #6a9955;
 }
 
 .tree-label {
@@ -128,6 +146,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
-  line-height: 22px;
+  line-height: 28px;
 }
 </style>

@@ -1,5 +1,6 @@
 <script>
-/** @type {any[]} */ let { hunks = [], filePath = '' } = $props()
+/** @type {{hunks?: any[], filePath?: string}} */
+let { hunks = [], filePath = '' } = $props()
 
 let acceptedHunks = $state(new Set())
 let unified = $state(true)
