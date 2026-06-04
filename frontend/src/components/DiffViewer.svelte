@@ -45,7 +45,7 @@ let acceptedCount = $derived(acceptedHunks.size)
     <div class="flex items-center gap-2 min-w-0">
       <span class="font-mono text-xs truncate" style="color: var(--text-primary);" title={filePath}>{filePath.split(/[\\/]/).pop()}</span>
     </div>
-    <div class="flex items-center gap-1 flex-shrink-0">
+    <div class="flex items-center gap-1 shrink-0">
       <span class="text-xs px-1.5 py-0.5 rounded" style="background-color: #2ea04322; color: #2ea043;">+{totalAdd}</span>
       <span class="text-xs px-1.5 py-0.5 rounded" style="background-color: #d73a4922; color: #d73a49;">-{totalDel}</span>
       <span class="text-xs" style="color: var(--text-muted);">{hunks.length} hunks</span>
@@ -69,7 +69,7 @@ let acceptedCount = $derived(acceptedHunks.size)
       >
         <!-- Hunk header -->
         <div class="flex items-center gap-2 px-3 py-1.5" style="background-color: var(--bg-tertiary);">
-          <div class="w-4 h-4 rounded border flex items-center justify-center flex-shrink-0" style="border-color: var(--border); background-color: {accepted ? '#2ea043' : 'transparent'};">
+          <div class="w-4 h-4 rounded border flex items-center justify-center shrink-0" style="border-color: var(--border); background-color: {accepted ? '#2ea043' : 'transparent'};">
             {#if accepted}
               <svg class="w-3 h-3" style="color: white;" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
             {/if}
@@ -84,12 +84,12 @@ let acceptedCount = $derived(acceptedHunks.size)
           {#each hunk.oldLines as line, j}
             {@const newLine = hunk.newLines[j]}
             <div class="flex">
-              <div class="flex-shrink-0 w-10 text-right pr-2 select-none" style="color: var(--text-muted); opacity: 0.5;">{hunk.oldStart + j}</div>
+              <div class="shrink-0 w-10 text-right pr-2 select-none" style="color: var(--text-muted); opacity: 0.5;">{hunk.oldStart + j}</div>
               <div class="flex-1 px-2" style="background-color: #d73a4915; color: #d73a49;">
                 <span class="select-none mr-2">-</span>{line || ''}
               </div>
               {#if newLine !== undefined}
-                <div class="flex-shrink-0 w-10 text-right pr-2 select-none" style="color: var(--text-muted); opacity: 0.5;">{hunk.newStart + j}</div>
+                <div class="shrink-0 w-10 text-right pr-2 select-none" style="color: var(--text-muted); opacity: 0.5;">{hunk.newStart + j}</div>
                 <div class="flex-1 px-2" style="background-color: #2ea04315; color: #2ea043;">
                   <span class="select-none mr-2">+</span>{newLine || ''}
                 </div>
@@ -100,9 +100,9 @@ let acceptedCount = $derived(acceptedHunks.size)
           {/each}
           {#each hunk.newLines.slice(hunk.oldLines.length) as line, j}
             <div class="flex">
-              <div class="flex-shrink-0 w-10"></div>
+              <div class="shrink-0 w-10"></div>
               <div class="flex-1"></div>
-              <div class="flex-shrink-0 w-10 text-right pr-2 select-none" style="color: var(--text-muted); opacity: 0.5;">{hunk.newStart + hunk.oldLines.length + j}</div>
+              <div class="shrink-0 w-10 text-right pr-2 select-none" style="color: var(--text-muted); opacity: 0.5;">{hunk.newStart + hunk.oldLines.length + j}</div>
               <div class="flex-1 px-2" style="background-color: #2ea04315; color: #2ea043;">
                 <span class="select-none mr-2">+</span>{line || ''}
               </div>

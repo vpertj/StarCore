@@ -480,7 +480,7 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
     onmousedown={startResize}
   ></div>
 
-  <div class="h-full flex flex-col border-l flex-shrink-0 mode-{$aiMode}" style="width: {$aiPanelWidth}px; max-width: 50vw; background-color: var(--bg-primary); border-color: var(--border); overflow: clip;">
+  <div class="h-full flex flex-col border-l shrink-0 mode-{$aiMode}" style="width: {$aiPanelWidth}px; max-width: 50vw; background-color: var(--bg-primary); border-color: var(--border); overflow: clip;">
     <AIPanelHeader />
 
     <ContextPreview
@@ -523,7 +523,7 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
           {#each $toolCalls as tc}
             <div class="panel-card mt-2 text-xs" in:fly={{ y: 8, duration: 200 }}>
               <div class="flex items-center gap-2">
-                <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: var(--warning);">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: var(--warning);">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.57 2.572-1.065z" />
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
@@ -567,13 +567,13 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
         {#each $messages as message, msgIdx}
           <div class="group relative flex gap-3" in:fade={{ duration: 150 }}>
             {#if message.role === 'user'}
-              <div class="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style="background-color: var(--accent);">
+              <div class="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style="background-color: var(--accent);">
                 <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: #ffffff;">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                 </svg>
               </div>
             {:else}
-              <div class="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style="background-color: var(--ai-color);">
+              <div class="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style="background-color: var(--ai-color);">
                 <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: #ffffff;">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
@@ -663,7 +663,7 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
 
         {#if $isGenerating}
           <div class="flex gap-3" in:fade={{ duration: 200 }}>
-            <div class="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style="background-color: var(--ai-color);">
+            <div class="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style="background-color: var(--ai-color);">
               <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: #ffffff;">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
@@ -728,10 +728,10 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
       <!-- Model/Agent/Mode dropdowns -->
       <div class="flex items-center gap-2 mb-2 flex-wrap">
         <div class="relative">
-          <button class="dropdown-trigger flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors flex-shrink-0" style="background-color: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border);" onclick={(e) => { e.stopPropagation(); showAgentDropdown = !$masterMode && !showAgentDropdown; showModelDropdown = false; showModeDropdown = false }}>
+          <button class="dropdown-trigger flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors shrink-0" style="background-color: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border);" onclick={(e) => { e.stopPropagation(); showAgentDropdown = !$masterMode && !showAgentDropdown; showModelDropdown = false; showModeDropdown = false }}>
             <span>{activeAgent.icon}</span>
             {#if $masterMode}<span>AUTO</span>{:else}<span style="max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{activeAgent.name}</span>{/if}
-            {#if !$masterMode}<svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>{/if}
+            {#if !$masterMode}<svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>{/if}
           </button>
           {#if showAgentDropdown}
             <div class="absolute bottom-full left-0 mb-1 z-50 rounded shadow-lg overflow-y-auto" style="background-color: var(--bg-secondary); border: 1px solid var(--border); min-width: 180px; max-height: 260px;">
@@ -745,10 +745,10 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
           {/if}
         </div>
         <div class="relative">
-          <button class="dropdown-trigger flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors flex-shrink-0" style="background-color: var(--bg-secondary); color: var(--text-secondary); border: 1px solid var(--border);" onclick={(e) => { e.stopPropagation(); showModelDropdown = !showModelDropdown; showAgentDropdown = false; showModeDropdown = false }}>
+          <button class="dropdown-trigger flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors shrink-0" style="background-color: var(--bg-secondary); color: var(--text-secondary); border: 1px solid var(--border);" onclick={(e) => { e.stopPropagation(); showModelDropdown = !showModelDropdown; showAgentDropdown = false; showModeDropdown = false }}>
             <span style="max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{activeModel?.name || 'No models'}</span>
             <span style="color: var(--text-muted); font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50px;">{displayProviderName}</span>
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
           </button>
           {#if showModelDropdown}
             <div class="absolute bottom-full right-0 mb-1 z-50 rounded shadow-lg overflow-y-auto" style="background-color: var(--bg-secondary); border: 1px solid var(--border); min-width: 180px; max-height: 260px;">
@@ -771,13 +771,13 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
           {/if}
         </div>
         <div class="relative">
-          <button class="dropdown-trigger flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors flex-shrink-0" style="background-color: {$aiMode !== 'chat' ? '#094771' : 'var(--bg-secondary)'}; color: {$aiMode !== 'chat' ? '#ffffff' : 'var(--text-secondary)'}; border: 1px solid var(--border);" onclick={(e) => { e.stopPropagation(); showModeDropdown = !showModeDropdown; showAgentDropdown = false; showModelDropdown = false }}>
+          <button class="dropdown-trigger flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors shrink-0" style="background-color: {$aiMode !== 'chat' ? '#094771' : 'var(--bg-secondary)'}; color: {$aiMode !== 'chat' ? '#ffffff' : 'var(--text-secondary)'}; border: 1px solid var(--border);" onclick={(e) => { e.stopPropagation(); showModeDropdown = !showModeDropdown; showAgentDropdown = false; showModelDropdown = false }}>
             {#if $aiMode === 'plan'}<svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>{:else if $aiMode === 'build'}<svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>{:else}<svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>{/if}
             <span style="max-width: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{$masterMode ? ($aiMode === 'plan' ? 'Plan' : 'Build') : 'Chat'}</span>
             {#if $masterMode}
               <span class="text-xs px-1 rounded" style="background-color: #ffcc0030; color: #ffcc00; font-size: 8px;">MASTER</span>
             {/if}
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
           </button>
           {#if showModeDropdown}
             <div class="absolute bottom-full right-0 mb-1 z-50 rounded shadow-lg overflow-y-auto" style="background-color: var(--bg-secondary); border: 1px solid var(--border); min-width: 150px;">
@@ -865,7 +865,7 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
                   style="background-color: {i === focusedFileIndex ? 'var(--bg-hover)' : 'transparent'};"
                   onclick={() => selectFile(filePath)}
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: var(--info);">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: var(--info);">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
                   <span class="truncate text-xs">{filePath.split(/[\\/]/).pop()}</span>

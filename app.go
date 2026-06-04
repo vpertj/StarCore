@@ -144,7 +144,8 @@ func NewApp() *App {
 	// --- Memory store ---
 	memStore, err := memory.NewStore(dataDir)
 	if err != nil {
-		log.Printf("Warning: failed to init memory store: %v", err)
+		// On Windows, CGO may be disabled; SQLite won't work but app continues
+		log.Printf("Warning: memory store unavailable: %v", err)
 	}
 
 	// --- MCP ---
@@ -725,6 +726,14 @@ func (a *App) SaveTokenUsageEntry(entry memory.TokenUsageEntry) error {
 	return a.memoryStore.SaveTokenUsage(&entry)
 }
 
+// ClearTokenUsage deletes all token usage records (reset).
+func (a *App) ClearTokenUsage() error {
+	if a.memoryStore == nil {
+		return nil
+	}
+	return a.memoryStore.ClearTokenUsage()
+}
+
 // ------- MCP -------
 
 // GetMCPServers returns all MCP server configurations.
@@ -819,6 +828,29 @@ func (a *App) AnalyzeProject(projectPath string) (string, error) {
 // GetProjectAnalysis retrieves a cached project analysis.
 func (a *App) GetProjectAnalysis(projectPath string) (string, error) {
 	return a.contextBuilder.GetProjectAnalysis(projectPath)
+}
+
+// ------- Editor settings persistence (file-based, like VS Code's settings.json) -------
+
+// SaveEditorSettings persists editor settings to the StarCore config directory.
+// This is the authoritative store — localStorage is only a fast cache.
+func (a *App) SaveEditorSettings(settingsJSON string) error {
+	configPath := filepath.Join(configDir(), "editor_settings.json")
+	return ioutil.WriteFile(configPath, []byte(settingsJSON), 0644)
+}
+
+// LoadEditorSettings loads editor settings from the config directory.
+// Returns empty string if the file doesn't exist (first run).
+func (a *App) LoadEditorSettings() (string, error) {
+	configPath := filepath.Join(configDir(), "editor_settings.json")
+	data, err := ioutil.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	return string(data), nil
 }
 
 // ------- Custom models -------

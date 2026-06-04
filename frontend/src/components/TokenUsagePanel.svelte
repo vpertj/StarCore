@@ -1,8 +1,9 @@
 <script>
 import { onMount } from 'svelte'
-import { tokenStats, isLoadingStats, loadTokenUsage } from '../stores/tokenUsage.js'
+import { tokenStats, isLoadingStats, loadTokenUsage, clearTokenUsage } from '../stores/tokenUsage.js'
 
 let selectedPeriod = 'month'
+let clearing = false
 
 onMount(() => { loadTokenUsage(selectedPeriod) })
 
@@ -10,6 +11,13 @@ onMount(() => { loadTokenUsage(selectedPeriod) })
 function changePeriod(p) {
     selectedPeriod = p
     loadTokenUsage(p)
+}
+
+async function handleClear() {
+    if (!confirm('确定要清空所有 Token 用量记录吗？此操作不可撤销。')) return
+    clearing = true
+    await clearTokenUsage()
+    clearing = false
 }
 </script>
 
@@ -63,4 +71,15 @@ function changePeriod(p) {
   {:else}
     <div class="text-center py-4 text-sm" style="color: var(--text-secondary, var(--text-secondary));">暂无用量数据</div>
   {/if}
+
+  <div class="pt-4 border-t" style="border-color: var(--border, var(--border));">
+    <button
+      class="w-full px-4 py-2 rounded text-xs transition-colors"
+      style="background-color: var(--bg-tertiary, var(--border)); color: var(--text-secondary, var(--text-secondary));"
+      on:click={handleClear}
+      disabled={clearing}
+    >
+      {clearing ? '清空中...' : '重置用量数据'}
+    </button>
+  </div>
 </div>

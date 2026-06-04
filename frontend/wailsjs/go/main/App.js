@@ -26,6 +26,10 @@ export function ApplyDiff(arg1) {
   return window['go']['main']['App']['ApplyDiff'](arg1);
 }
 
+export function ClearTokenUsage() {
+  return window['go']['main']['App']['ClearTokenUsage']();
+}
+
 export function CloseWindow() {
   return window['go']['main']['App']['CloseWindow']();
 }
@@ -238,6 +242,10 @@ export function LoadCustomModels() {
   return window['go']['main']['App']['LoadCustomModels']();
 }
 
+export function LoadEditorSettings() {
+  return window['go']['main']['App']['LoadEditorSettings']();
+}
+
 export function MaximizeWindow() {
   return window['go']['main']['App']['MaximizeWindow']();
 }
@@ -280,6 +288,10 @@ export function SaveConversation(arg1) {
 
 export function SaveCustomModels(arg1) {
   return window['go']['main']['App']['SaveCustomModels'](arg1);
+}
+
+export function SaveEditorSettings(arg1) {
+  return window['go']['main']['App']['SaveEditorSettings'](arg1);
 }
 
 export function SaveKnowledge(arg1) {

@@ -76,6 +76,32 @@ func NewService(
 	}
 }
 
+// estimateCost calculates approximate API cost based on model pricing.
+func estimateCost(model string, tokensIn, tokensOut int) float64 {
+	model = strings.ToLower(model)
+	inPrice := 0.0
+	outPrice := 0.0
+	switch {
+	case strings.Contains(model, "gpt-4o"):
+		inPrice, outPrice = 2.50, 10.00
+	case strings.Contains(model, "gpt-4"):
+		inPrice, outPrice = 30.00, 60.00
+	case strings.Contains(model, "gpt-3.5"):
+		inPrice, outPrice = 0.50, 1.50
+	case strings.Contains(model, "claude-opus"):
+		inPrice, outPrice = 15.00, 75.00
+	case strings.Contains(model, "claude-sonnet"):
+		inPrice, outPrice = 3.00, 15.00
+	case strings.Contains(model, "claude-haiku"):
+		inPrice, outPrice = 0.25, 1.25
+	case strings.Contains(model, "deepseek"):
+		inPrice, outPrice = 0.14, 0.28
+	default:
+		return 0
+	}
+	return (float64(tokensIn)*inPrice + float64(tokensOut)*outPrice) / 1_000_000
+}
+
 func estimateTokens(text string) int {
 	cjk := 0
 	other := 0
@@ -615,15 +641,16 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 					for _, msg := range currentReq.Messages {
 						estimatedTokensIn += estimateTokens(msg.Content)
 					}
-					if s.memoryStore != nil && estimatedTokensIn > 0 {
+					estimatedTokensOut := estimateTokens(assistantContent)
+					if s.memoryStore != nil && (estimatedTokensIn > 0 || estimatedTokensOut > 0) {
 						usageEntry := &memory.TokenUsageEntry{
 							ID:             fmt.Sprintf("tu_%d", time.Now().UnixNano()),
-							ConversationID: "",
+							ConversationID: currentReq.ConversationID,
 							ProviderID:     currentReq.ProviderID,
 							Model:          currentReq.Model,
 							TokensIn:       estimatedTokensIn,
-							TokensOut:      estimateTokens(assistantContent),
-							Cost:           0,
+							TokensOut:      estimatedTokensOut,
+							Cost:           estimateCost(currentReq.Model, estimatedTokensIn, estimatedTokensOut),
 							CreatedAt:      time.Now().Format(time.RFC3339),
 						}
 						go s.memoryStore.SaveTokenUsage(usageEntry)

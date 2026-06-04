@@ -1,7 +1,7 @@
 <script>
  import { onMount, onDestroy } from 'svelte'
   import { EditorState, Compartment } from '@codemirror/state'
- import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, WidgetType, Decoration, drawSelection } from '@codemirror/view'
+ import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, WidgetType, Decoration } from '@codemirror/view'
  import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
  import { syntaxHighlighting, defaultHighlightStyle, HighlightStyle } from '@codemirror/language'
  import { tags } from '@lezer/highlight'
@@ -275,7 +275,6 @@
      highlightActiveLineGutter(),
      lintGutter(),
      customLinter,
-     drawSelection(),
      history(),
      keymap.of([
        ...defaultKeymap,
@@ -351,22 +350,24 @@
        },
        '.cm-scroller': { overflow: 'auto', fontSmooth: 'always' },
        '.cm-content': { padding: '12px 0', lineHeight: String(getStoreValue(editorSettings).lineHeight) },
-       '.cm-line': { padding: '0 16px' },
+       '.cm-line': { padding: '0 12px' },
        '.cm-gutters': {
          backgroundColor: 'var(--bg-primary)',
          borderRight: '1px solid var(--border)',
          color: 'var(--text-muted)',
+        minWidth: '28px',
+        maxWidth: '40px',
        },
        '.cm-lineNumbers .cm-gutterElement': {
-         padding: '0 12px 0 8px',
+         padding: '0 5px 0 4px',
          color: '#5a5a5a',
-         fontSize: '13px',
+         fontSize: '12px',
          fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace",
        },
        '.cm-activeLine': { backgroundColor: 'rgba(255, 255, 255, 0.03)' },
        '.cm-activeLineGutter': { backgroundColor: 'rgba(255, 255, 255, 0.04)', color: '#999999' },
-       '.cm-selectionBackground': { backgroundColor: 'rgba(38, 79, 120, 0.6)' },
-       '&.cm-focused .cm-selectionBackground': { backgroundColor: 'rgba(38, 79, 120, 0.7)' },
+       '.cm-selectionBackground': { backgroundColor: 'rgba(86, 156, 214, 0.25)' },
+       '&.cm-focused .cm-selectionBackground': { backgroundColor: 'rgba(86, 156, 214, 0.25)' },
        '&.cm-focused .cm-cursor': { borderLeftColor: getStoreValue(editorSettings).cursorColor, borderLeftWidth: getStoreValue(editorSettings).cursorWidth + 'px' },
        '.cm-cursor': { borderLeftColor: getStoreValue(editorSettings).cursorColor, borderLeftWidth: getStoreValue(editorSettings).cursorWidth + 'px' },
        '.cm-cursorDrop': { borderLeftColor: getStoreValue(editorSettings).cursorColor },
@@ -702,6 +703,8 @@
 :global(.cm-editor .cm-content) {
   caret-color: transparent;
 }
+
+
 
 /* Cursor blink animations */
 :global(.cm-cursor-blink) { animation: cm-blink 1.06s steps(1) infinite; }

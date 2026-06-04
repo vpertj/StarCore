@@ -843,6 +843,7 @@ export namespace provider {
 	    selectedCode?: string;
 	    tools?: ToolDefinition[];
 	    mode?: string;
+	    conversationId?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ChatRequest(source);
@@ -865,6 +866,7 @@ export namespace provider {
 	        this.selectedCode = source["selectedCode"];
 	        this.tools = this.convertValues(source["tools"], ToolDefinition);
 	        this.mode = source["mode"];
+	        this.conversationId = source["conversationId"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

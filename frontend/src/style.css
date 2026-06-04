@@ -153,6 +153,13 @@
     ::selection {
         background: var(--selection);
     }
+
+    /* CodeMirror selection — single source, same color focused & unfocused */
+    .cm-editor ::selection,
+    .cm-editor .cm-content ::selection,
+    .cm-editor .cm-line ::selection {
+        background: rgba(86, 156, 214, 0.3);
+    }
 }
 
 @layer components {

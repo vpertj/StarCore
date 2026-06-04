@@ -22,6 +22,8 @@ export function AnalyzeProject(arg1:string):Promise<string>;
 
 export function ApplyDiff(arg1:main.ApplyDiffRequest):Promise<void>;
 
+export function ClearTokenUsage():Promise<void>;
+
 export function CloseWindow():Promise<void>;
 
 export function ComputeDiff(arg1:string,arg2:string):Promise<Array<files.DiffHunk>>;
@@ -128,6 +130,8 @@ export function ListTerminals():Promise<Array<Record<string, any>>>;
 
 export function LoadCustomModels():Promise<Array<main.CustomModelEntry>>;
 
+export function LoadEditorSettings():Promise<string>;
+
 export function MaximizeWindow():Promise<void>;
 
 export function MinimizeWindow():Promise<void>;
@@ -149,6 +153,8 @@ export function ReplaceInFiles(arg1:string,arg2:string,arg3:files.SearchOptions)
 export function SaveConversation(arg1:memory.Conversation):Promise<void>;
 
 export function SaveCustomModels(arg1:Array<main.CustomModelEntry>):Promise<void>;
+
+export function SaveEditorSettings(arg1:string):Promise<void>;
 
 export function SaveKnowledge(arg1:memory.Knowledge):Promise<void>;
 

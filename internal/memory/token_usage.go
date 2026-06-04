@@ -46,12 +46,26 @@ func (s *Store) GetTokenUsage(projectPath string, period string) (*TokenUsageSta
 	stats := &TokenUsageStats{
 		ByProvider: make(map[string]ProviderUsage),
 	}
-	query := `SELECT tu.provider_id, SUM(tu.tokens_in), SUM(tu.tokens_out), SUM(tu.cost)
-		FROM token_usage tu
-		JOIN conversations c ON tu.conversation_id = c.id
-		WHERE c.project_path = ? AND tu.created_at >= ?
-		GROUP BY tu.provider_id`
-	rows, err := s.db.Query(query, projectPath, since)
+
+	var query string
+	var args []interface{}
+
+	if projectPath != "" {
+		query = `SELECT tu.provider_id, SUM(tu.tokens_in), SUM(tu.tokens_out), SUM(tu.cost)
+			FROM token_usage tu
+			JOIN conversations c ON tu.conversation_id = c.id
+			WHERE c.project_path = ? AND tu.created_at >= ?
+			GROUP BY tu.provider_id`
+		args = []interface{}{projectPath, since}
+	} else {
+		query = `SELECT provider_id, SUM(tokens_in), SUM(tokens_out), SUM(cost)
+			FROM token_usage
+			WHERE created_at >= ?
+			GROUP BY provider_id`
+		args = []interface{}{since}
+	}
+
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -73,6 +87,14 @@ func (s *Store) GetTokenUsage(projectPath string, period string) (*TokenUsageSta
 		stats.TotalCost += cost
 	}
 	return stats, rows.Err()
+}
+
+// ClearTokenUsage deletes all token usage records.
+func (s *Store) ClearTokenUsage() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`DELETE FROM token_usage`)
+	return err
 }
 
 func periodToTime(period string) string {

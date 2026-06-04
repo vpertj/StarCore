@@ -62,7 +62,7 @@
       <div>
         <h3 class="text-xs font-medium mb-2" style="color: var(--text-secondary);">Built-in</h3>
         <div class="flex items-center gap-3 px-3 py-2 rounded mb-1" style="background-color: var(--bg-primary); border: 1px solid var(--border);">
-          <svg viewBox="0 0 16 16" class="w-4 h-4 flex-shrink-0" fill="none" stroke="#4ec9b0">
+          <svg viewBox="0 0 16 16" class="w-4 h-4 shrink-0" fill="none" stroke="#4ec9b0">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2 2h4v4H2zM10 2h4v4h-4zM2 10h4v4H2zM10 10h4v4h-4z"/>
           </svg>
           <div class="flex-1 min-w-0">
@@ -72,7 +72,7 @@
           <span class="text-xs" style="color: #2ea043;">active</span>
         </div>
         <div class="flex items-center gap-3 px-3 py-2 rounded mb-1" style="background-color: var(--bg-primary); border: 1px solid var(--border);">
-          <svg viewBox="0 0 16 16" class="w-4 h-4 flex-shrink-0" fill="none" stroke="#e5c07b">
+          <svg viewBox="0 0 16 16" class="w-4 h-4 shrink-0" fill="none" stroke="#e5c07b">
             <path stroke-linecap="round" stroke-width="1.5" d="M2 3h12M2 8h8M2 13h12"/>
           </svg>
           <div class="flex-1 min-w-0">
@@ -82,7 +82,7 @@
           <span class="text-xs" style="color: #2ea043;">active</span>
         </div>
         <div class="flex items-center gap-3 px-3 py-2 rounded mb-1" style="background-color: var(--bg-primary); border: 1px solid var(--border);">
-          <svg viewBox="0 0 16 16" class="w-4 h-4 flex-shrink-0" fill="none" stroke="#4fc1ff">
+          <svg viewBox="0 0 16 16" class="w-4 h-4 shrink-0" fill="none" stroke="#4fc1ff">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
           </svg>
           <div class="flex-1 min-w-0">

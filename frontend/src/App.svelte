@@ -3,7 +3,7 @@ import { bottomPanelVisible, bottomPanelTab, aiPanelVisible } from './stores/ui.
 import { settingsVisible, activeFile, editorGroups } from './stores/app.js'
  import { initCustomModels } from './stores/provider.js'
   import { EventsOn } from '../wailsjs/runtime/runtime.js'
-  import { editorSettings, updateEditorSetting } from './stores/editorSettings.js'
+  import { editorSettings, updateEditorSetting, initEditorSettings } from './stores/editorSettings.js'
   import { get } from 'svelte/store'
   import { onMount, onDestroy } from 'svelte'
 import ActivityBar from './components/ActivityBar.svelte'
@@ -52,6 +52,11 @@ initCustomModels()
 
 let showWelcome = $state(false)
 let welcomeUnsub = null
+
+// Sync editor settings from backend file system (authoritative source)
+onMount(() => {
+  initEditorSettings()
+})
 
 /** @param {WheelEvent} e */
 function handleWheel(e) {

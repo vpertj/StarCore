@@ -101,7 +101,7 @@ async function handleAdd() {
     <div class="p-2 rounded space-y-1" style="background-color: var(--bg-primary); border: 1px solid var(--border);">
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-2">
-          <span class="inline-block w-2 h-2 rounded-full flex-shrink-0" style="background-color: {status === 'running' ? '#2ea043' : status === 'error' ? '#d73a49' : '#666'};"></span>
+          <span class="inline-block w-2 h-2 rounded-full shrink-0" style="background-color: {status === 'running' ? '#2ea043' : status === 'error' ? '#d73a49' : '#666'};"></span>
           <div>
             <div class="text-sm" style="color: var(--text-primary);">{server.name}</div>
             <div class="text-xs" style="color: var(--text-muted);">{server.id} · {server.transport} · <span style="color: {status === 'running' ? '#2ea043' : 'var(--text-muted)'};">{status === 'running' ? '运行中' : status === 'disabled' ? '已禁用' : '已停止'}</span></div>

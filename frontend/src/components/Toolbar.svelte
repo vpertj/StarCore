@@ -133,8 +133,7 @@ onDestroy(() => {
 <!-- -webkit-app-region 为 Electron 专有属性，在 Wails/WebView2 下无效，已改用前端鼠标事件实现窗口拖动 -->
 <div class="toolbar-root" onmousedown={onToolbarMouseDown} ondblclick={(e) => { if (!e.target.closest('button')) { isDragging = false; WindowToggleMaximise() } }}>
   <div class="left-section">
-    <span class="logo-dot"></span>
-    <span class="font-semibold text-xs" style="color: var(--text-primary)">StarCore</span>
+    <img src="./src/assets/images/logo-universal.png" alt="StarCore" class="logo-img" />
 
     {#if $currentProject}
       <div class="project-badge">
@@ -223,16 +222,13 @@ onDestroy(() => {
   min-width: 0;
   height: 100%;
   padding: 0 10px;
-  background: linear-gradient(135deg, #1a5c2a 0%, #1e6930 50%, #175023 100%);
-  border-right: 1px solid #2a8a3e;
+  background-color: var(--bg-secondary);
+  border-right: 1px solid var(--bg-tertiary);
 }
 
-.logo-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background-color: #4ade80;
-  box-shadow: 0 0 6px #4ade80;
+.logo-img {
+  height: 18px;
+  width: auto;
   flex-shrink: 0;
 }
 

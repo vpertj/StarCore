@@ -32,7 +32,7 @@
   <div class="ai-header-right">
     <div class="relative">
       <button
-        class="dropdown-trigger p-1 rounded transition-colors flex-shrink-0"
+        class="dropdown-trigger p-1 rounded transition-colors shrink-0"
         style="color: var(--text-secondary);"
         onclick={(e) => { e.stopPropagation(); toggleHistory() }}
         title={$t('history.title')}
@@ -81,7 +81,7 @@
 
     
     <button
-      class="p-1 rounded transition-colors flex-shrink-0"
+      class="p-1 rounded transition-colors shrink-0"
       style="color: var(--text-secondary);"
       onclick={clearMessages}
       title={$t('history.newChat')}
@@ -93,7 +93,7 @@
     </button>
 
     <button
-      class="p-1 rounded transition-colors flex-shrink-0"
+      class="p-1 rounded transition-colors shrink-0"
       style="color: var(--text-secondary);"
       onclick={() => aiPanelVisible.set(false)}
       title={$t('common.close')}

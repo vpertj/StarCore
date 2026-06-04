@@ -73,6 +73,7 @@ type ChatRequest struct {
 	SelectedCode      string           `json:"selectedCode,omitempty"`
 	Tools             []ToolDefinition `json:"tools,omitempty"`
 	Mode              string           `json:"mode,omitempty"`
+	ConversationID    string           `json:"conversationId,omitempty"`
 }
 
 type ChatResponse struct {

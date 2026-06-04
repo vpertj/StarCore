@@ -21,3 +21,13 @@ export async function loadTokenUsage(period = 'month') {
         isLoadingStats.set(false)
     }
 }
+
+export async function clearTokenUsage() {
+    if (!window.backend?.ClearTokenUsage) return
+    try {
+        await window.backend.ClearTokenUsage()
+        tokenStats.set(null)
+    } catch (/** @type {any} */ e) {
+        console.error('Failed to clear token usage:', e)
+    }
+}

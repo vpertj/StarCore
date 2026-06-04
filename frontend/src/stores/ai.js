@@ -334,6 +334,7 @@ export async function sendMessage(content, attachedFiles) {
     activeFile: get(activeFile) || '',
     activeFileContent: $activeFileContent || '',
     selectedCode: $selectedCode || '',
+    conversationId: get(activeConversationId) || '',
     mode: get(aiMode) || 'chat',
   }
 

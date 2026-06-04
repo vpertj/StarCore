@@ -25,3 +25,7 @@ go.work.sum
 # env file
 .env
 
+# Node
+frontend/node_modules/
+frontend/dist/
+

@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StarCore Settings</title>
+<style>
+:root {
+  --bg-primary: #1e1e2e;
+  --bg-secondary: #181825;
+  --bg-tertiary: #11111b;
+  --border: #313244;
+  --text-primary: #cdd6f4;
+  --text-secondary: #a6adc8;
+  --text-muted: #6c7086;
+  --accent: #89b4fa;
+  --accent-hover: #b4d0fc;
+  --green: #a6e3a1;
+  --red: #f38ba8;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  font-family:"JetBrains Mono","Cascadia Code","Fira Code","Consolas",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  background:var(--bg-primary);color:var(--text-primary);
+  overflow:hidden;height:100vh;display:flex;flex-direction:column;
+  -webkit-app-region: no-drag;
+}
+.header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 16px;border-bottom:1px solid var(--border);background:var(--bg-secondary);
+  -webkit-app-region: drag;
+}
+.header h2{font-size:16px;font-weight:600;letter-spacing:.5px}
+.close-btn{
+  background:transparent;border:none;color:var(--text-secondary);cursor:pointer;
+  font-size:20px;line-height:1;padding:4px 8px;border-radius:4px;
+  -webkit-app-region: no-drag;
+}
+.close-btn:hover{color:var(--text-primary);background:var(--bg-tertiary)}
+.body{display:flex;flex:1;overflow:hidden}
+.sidebar{
+  width:170px;border-right:1px solid var(--border);background:var(--bg-secondary);
+  padding:8px 0;overflow-y:auto;flex-shrink:0;
+}
+.tab-btn{
+  display:flex;align-items:center;gap:8px;width:100%;padding:9px 16px;
+  border:none;background:transparent;color:var(--text-secondary);
+  cursor:pointer;font-size:13px;text-align:left;transition:background .12s;
+  font-family:inherit;
+}
+.tab-btn:hover{background:var(--bg-tertiary)}
+.tab-btn.active{background:var(--bg-primary);color:var(--text-primary);border-left:3px solid var(--accent);padding-left:13px}
+.tab-icon{font-size:15px}
+.content{flex:1;padding:20px;overflow-y:auto}
+.form-row{margin-bottom:14px}
+.form-row label{display:block;font-size:11px;color:var(--text-secondary);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px}
+.form-row select,.form-row input[type="text"],.form-row input[type="password"],.form-row input[type="number"]{
+  width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius);
+  background:var(--bg-tertiary);color:var(--text-primary);font-size:13px;font-family:inherit;
+}
+.form-row select:focus,.form-row input:focus{outline:none;border-color:var(--accent)}
+.form-row input[type="range"]{width:100%;accent-color:var(--accent)}
+.check-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px}
+.check-row input[type="checkbox"]{accent-color:var(--accent)}
+.footer{
+  display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;
+  border-top:1px solid var(--border);background:var(--bg-secondary);
+}
+.btn{
+  padding:7px 18px;border:none;border-radius:var(--radius);cursor:pointer;
+  font-size:13px;font-family:inherit;font-weight:500;transition:background .12s;
+}
+.btn-primary{background:var(--accent);color:#11111b}
+.btn-primary:hover{background:var(--accent-hover)}
+.btn-secondary{background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border)}
+.btn-secondary:hover{background:var(--border)}
+.section-title{
+  font-size:13px;font-weight:600;margin-bottom:14px;color:var(--text-primary);
+  padding-bottom:8px;border-bottom:1px solid var(--border);text-transform:uppercase;letter-spacing:.8px;
+}
+.empty{padding:32px;text-align:center;color:var(--text-muted);font-size:13px}
+.loading{padding:40px;text-align:center;color:var(--text-muted);font-size:14px}
+.loading::after{content:'...';animation:dots 1.5s steps(4,end) infinite}
+@keyframes dots{0%,20%{content:'.'}40%{content:'..'}60%,100%{content:'...'}}
+.provider-card{
+  background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius);
+  padding:12px;margin-bottom:8px;font-size:13px;
+}
+.provider-card .pname{font-weight:600;margin-bottom:4px}
+.provider-card .pinfo{font-size:11px;color:var(--text-secondary)}
+.model-item{
+  display:flex;align-items:center;padding:6px 10px;border-radius:4px;font-size:12px;
+  background:var(--bg-tertiary);margin-bottom:2px;
+}
+.model-item .dot{width:7px;height:7px;border-radius:50%;margin-right:8px;flex-shrink:0;background:var(--green)}
+</style>
+</head>
+<body>
+<div class="header">
+  <h2>StarCore 设置</h2>
+  <button class="close-btn" onclick="closeWindow()">&times;</button>
+</div>
+<div class="body">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="content" id="content"><div class="loading">加载中</div></div>
+</div>
+<div class="footer">
+  <button class="btn btn-secondary" onclick="closeWindow()">取消</button>
+  <button class="btn btn-primary" onclick="saveAndClose()">保存并关闭</button>
+</div>
+
+<script>
+var origin = window.location.origin;
+var currentSettings = {};
+
+var palettes = {
+  dark:       {bg:'#1e1e2e',bg2:'#181825',bg3:'#11111b',bd:'#313244',t1:'#cdd6f4',t2:'#a6adc8',t3:'#6c7086',ac:'#89b4fa',ach:'#b4d0fc',gr:'#a6e3a1',rd:'#f38ba8'},
+  light:      {bg:'#eff1f5',bg2:'#e6e9ef',bg3:'#dce0e8',bd:'#ccd0da',t1:'#4c4f69',t2:'#5c5f77',t3:'#9ca0b0',ac:'#1e66f5',ach:'#2a7afc',gr:'#40a02b',rd:'#d20f39'},
+  'one-dark': {bg:'#282c34',bg2:'#21252b',bg3:'#1b1f24',bd:'#3e4451',t1:'#abb2bf',t2:'#828997',t3:'#5c6370',ac:'#61afef',ach:'#78c0f8',gr:'#98c379',rd:'#e06c75'},
+  dracula:    {bg:'#282a36',bg2:'#21222c',bg3:'#191a21',bd:'#44475a',t1:'#f8f8f2',t2:'#bdbec7',t3:'#6272a4',ac:'#bd93f9',ach:'#cdb3ff',gr:'#50fa7b',rd:'#ff5555'},
+  nord:       {bg:'#2e3440',bg2:'#3b4252',bg3:'#242933',bd:'#4c566a',t1:'#d8dee9',t2:'#b1b9cb',t3:'#616e88',ac:'#88c0d0',ach:'#8fbcbb',gr:'#a3be8c',rd:'#bf616a'},
+  monokai:    {bg:'#272822',bg2:'#1e1f1c',bg3:'#1b1c18',bd:'#49483e',t1:'#f8f8f2',t2:'#a59f85',t3:'#75715e',ac:'#a6e22e',ach:'#b8f33e',gr:'#a6e22e',rd:'#f92672'},
+  github:     {bg:'#ffffff',bg2:'#f6f8fa',bg3:'#eaeef2',bd:'#d0d7de',t1:'#1f2328',t2:'#656d76',t3:'#8b949e',ac:'#0969da',ach:'#218bff',gr:'#1a7f37',rd:'#cf222e'},
+};
+
+function applyTheme(name) {
+  var p = palettes[name] || palettes['dark'];
+  var r = document.documentElement.style;
+  r.setProperty('--bg-primary', p.bg);
+  r.setProperty('--bg-secondary', p.bg2);
+  r.setProperty('--bg-tertiary', p.bg3);
+  r.setProperty('--border', p.bd);
+  r.setProperty('--text-primary', p.t1);
+  r.setProperty('--text-secondary', p.t2);
+  r.setProperty('--text-muted', p.t3);
+  r.setProperty('--accent', p.ac);
+  r.setProperty('--accent-hover', p.ach);
+  r.setProperty('--green', p.gr);
+  r.setProperty('--red', p.rd);
+}
+
+var tabs = [
+  {id:'general', icon:'&#9881;', label:'通用'},
+  {id:'appearance', icon:'&#127912;', label:'外观'},
+  {id:'editor', icon:'&#9999;', label:'编辑器'},
+  {id:'ai', icon:'&#129302;', label:'AI 模型'},
+  {id:'about', icon:'&#8505;', label:'关于'},
+];
+var activeTab = 'general';
+
+function init() {
+  fetch(origin+'/api/get')
+    .then(function(r){return r.json()})
+    .then(function(s){
+      currentSettings = s || {};
+      applyTheme(currentSettings.theme || 'dark');
+      renderAll();
+    })
+    .catch(function(){
+      currentSettings = {};
+      applyTheme('dark');
+      renderAll();
+    });
+}
+
+function renderAll() {
+  renderSidebar();
+  renderTab('general');
+}
+
+function renderSidebar() {
+  document.getElementById('sidebar').innerHTML = tabs.map(function(t){
+    return '<button class="tab-btn'+(t.id===activeTab?' active':'')+'" onclick="switchTab(\''+t.id+'\')"><span class="tab-icon">'+t.icon+'</span>'+t.label+'</button>';
+  }).join('');
+}
+
+function switchTab(id) {
+  activeTab = id;
+  renderSidebar();
+  renderTab(id);
+}
+
+function renderTab(id) {
+  var c = document.getElementById('content');
+  var fn = ({general:renderGeneral,appearance:renderAppearance,editor:renderEditor,ai:renderAI,about:renderAbout})[id];
+  if (fn) fn(c);
+  else c.innerHTML = '<div class="empty">内容加载失败</div>';
+}
+
+function G(key, def) { return currentSettings[key] !== undefined ? currentSettings[key] : def; }
+
+function renderGeneral(c) {
+  c.innerHTML =
+    '<div class="section-title">通用设置</div>'+
+    '<div class="form-row"><label>界面语言</label>'+
+    '<select onchange="currentSettings.lang=this.value">'+
+    '<option value="zh"'+(G('lang','zh')==='zh'?' selected':'')+'>中文</option>'+
+    '<option value="en"'+(G('lang','zh')==='en'?' selected':'')+'>English</option>'+
+    '</select></div>';
+}
+
+function renderAppearance(c) {
+  var themes = [{id:'dark',n:'Dark (默认)'},{id:'light',n:'Light'},{id:'one-dark',n:'One Dark'},{id:'dracula',n:'Dracula'},{id:'nord',n:'Nord'},{id:'monokai',n:'Monokai'},{id:'github',n:'GitHub'}];
+  var topts = themes.map(function(t){return '<option value="'+t.id+'"'+(G('theme','dark')===t.id?' selected':'')+'>'+t.n+'</option>'}).join('');
+  var fonts = ['system','Cascadia Code','JetBrains Mono','Fira Code','Consolas','Monaco'];
+  var fopts = fonts.map(function(f){return '<option value="'+f+'"'+(G('fontFamily','system')===f?' selected':'')+'>'+(f==='system'?'系统默认':f)+'</option>'}).join('');
+  c.innerHTML =
+    '<div class="section-title">外观设置</div>'+
+    '<div class="form-row"><label>主题</label><select onchange="currentSettings.theme=this.value">'+topts+'</select></div>'+
+    '<div class="form-row"><label>字体</label><select onchange="currentSettings.fontFamily=this.value">'+fopts+'</select></div>';
+}
+
+function renderEditor(c) {
+  var fs = G('fontSize',14);
+  var lh = G('lineHeight',1.5);
+  c.innerHTML =
+    '<div class="section-title">编辑器设置</div>'+
+    '<div class="form-row"><label>字体大小: <b>'+fs+'px</b></label><input type="range" min="10" max="24" value="'+fs+'" oninput="var v=this.value;this.parentElement.querySelector(\'b\').textContent=v+\'px\';currentSettings.fontSize=parseInt(v)"></div>'+
+    '<div class="form-row"><label>行高: <b>'+lh+'</b></label><input type="range" min="1.2" max="2.4" step="0.1" value="'+lh+'" oninput="var v=this.value;this.parentElement.querySelector(\'b\').textContent=v;currentSettings.lineHeight=parseFloat(v)"></div>'+
+    '<div class="check-row"><input type="checkbox" id="ww" '+(G('wordWrap',true)?'checked':'')+' onchange="currentSettings.wordWrap=this.checked"><label for="ww">自动换行</label></div>'+
+    '<div class="check-row"><input type="checkbox" id="mm" '+(G('minimap',true)?'checked':'')+' onchange="currentSettings.minimap=this.checked"><label for="mm">缩略图</label></div>';
+}
+
+function renderAI(c) {
+  var providers = currentSettings.providers || [];
+  var models = currentSettings.models || [];
+  var html = '<div class="section-title">AI 提供商</div>';
+  if (providers.length === 0) html += '<div class="empty">暂无配置</div>';
+  else providers.forEach(function(p){
+    html += '<div class="provider-card"><div class="pname">'+esc(p.name)+'</div><div class="pinfo">ID: '+esc(p.id)+' | 端点: '+(p.endpoint||'默认')+'</div></div>';
+  });
+  if (models.length > 0) {
+    html += '<div class="section-title" style="margin-top:20px">已启用模型</div>';
+    models.filter(function(m){return m.enabled!==false}).forEach(function(m){
+      html += '<div class="model-item"><span class="dot"></span><span>'+esc(m.name)+'</span><span style="color:var(--text-muted);margin-left:auto;font-size:11px">'+esc(m.providerName)+'</span></div>';
+    });
+  }
+  c.innerHTML = html;
+}
+
+function renderAbout(c) {
+  c.innerHTML =
+    '<div class="section-title">关于 StarCore</div>'+
+    '<p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">AI 驱动的下一代 IDE</p>'+
+    '<div style="font-size:12px;color:var(--text-muted);line-height:2">'+
+    '<div>版本 1.0.0</div><div>Go 1.23 + Wails v2</div><div>Svelte 5 + CodeMirror 6</div><div>OpenAI · Anthropic · DeepSeek · Ollama</div></div>';
+}
+
+function esc(s) {
+  var d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function saveAndClose() {
+  fetch(origin+'/api/save', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(currentSettings)
+  }).finally(function(){ window.close(); });
+}
+
+function closeWindow() {
+  fetch(origin+'/api/close');
+  window.close();
+}
+
+init();
+</script>
+</body>
+</html>
