@@ -151,8 +151,12 @@ func ShowStandaloneSettings(mainX, mainY, mainW, mainH int) {
 		cx = (int(sx) - ww) / 2
 		cy = (int(sy) - wh) / 2
 	}
-	if cx < 0 { cx = 0 }
-	if cy < 0 { cy = 0 }
+	if cx < 0 {
+		cx = 0
+	}
+	if cy < 0 {
+		cy = 0
+	}
 	launchEdge(url, ww, wh, cx, cy)
 
 	go func() {

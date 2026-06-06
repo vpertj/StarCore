@@ -7,8 +7,9 @@ import {files} from '../models';
 import {skill} from '../models';
 import {agent} from '../models';
 import {memory} from '../models';
-import {git} from '../models';
 import {lsp} from '../models';
+import {git} from '../models';
+import {tools} from '../models';
 
 export function AIChat(arg1:provider.ChatRequest):Promise<string>;
 
@@ -16,11 +17,15 @@ export function AIChatStream(arg1:provider.ChatRequest):Promise<void>;
 
 export function AICompletion(arg1:string,arg2:provider.CompletionRequest):Promise<string>;
 
+export function AddLSPServer(arg1:string,arg2:string,arg3:Array<string>,arg4:Array<string>):Promise<void>;
+
 export function AddMCPServer(arg1:mcp.MCPServerConfig):Promise<void>;
 
 export function AnalyzeProject(arg1:string):Promise<string>;
 
 export function ApplyDiff(arg1:main.ApplyDiffRequest):Promise<void>;
+
+export function CheckCommandExists(arg1:string):Promise<boolean>;
 
 export function ClearTokenUsage():Promise<void>;
 
@@ -30,15 +35,21 @@ export function ComputeDiff(arg1:string,arg2:string):Promise<Array<files.DiffHun
 
 export function ConnectTerminal(arg1:string):Promise<void>;
 
+export function ContinueAgentLoop(arg1:number):Promise<void>;
+
 export function CreateDir(arg1:string):Promise<void>;
 
 export function CreateFile(arg1:string):Promise<void>;
 
 export function DeleteConversation(arg1:string):Promise<void>;
 
+export function DeleteConversationMessages(arg1:string):Promise<void>;
+
 export function DeleteFile(arg1:string):Promise<void>;
 
 export function DeleteKnowledge(arg1:string):Promise<void>;
+
+export function DeleteMessage(arg1:string):Promise<void>;
 
 export function DeleteSkill(arg1:string):Promise<void>;
 
@@ -56,6 +67,10 @@ export function GetConversations(arg1:string):Promise<Array<memory.Conversation>
 
 export function GetKnowledge(arg1:string):Promise<Array<memory.Knowledge>>;
 
+export function GetLSPServers():Promise<Array<lsp.FrontendServerInfo>>;
+
+export function GetLanguagePackages():Promise<Array<lsp.LanguagePackage>>;
+
 export function GetMCPServers():Promise<Array<mcp.MCPServerConfig>>;
 
 export function GetMessages(arg1:string):Promise<Array<memory.Message>>;
@@ -65,6 +80,8 @@ export function GetModels(arg1:string):Promise<Array<provider.Model>>;
 export function GetProjectAnalysis(arg1:string):Promise<string>;
 
 export function GetProviders():Promise<Array<provider.ProviderInfo>>;
+
+export function GetProxy():Promise<string|string>;
 
 export function GetSkills():Promise<Array<skill.SkillDef>>;
 
@@ -104,6 +121,8 @@ export function GitUnstage(arg1:string,arg2:string):Promise<void>;
 
 export function Greet(arg1:string):Promise<string>;
 
+export function InstallLanguagePackage(arg1:string):Promise<string>;
+
 export function InstallSkillFromURL(arg1:string):Promise<void>;
 
 export function IsProviderConfigured():Promise<boolean>;
@@ -111,6 +130,8 @@ export function IsProviderConfigured():Promise<boolean>;
 export function KillTerminal(arg1:string):Promise<void>;
 
 export function LSPCloseFile(arg1:string):Promise<void>;
+
+export function LSPCodeActions(arg1:string,arg2:number,arg3:number,arg4:number,arg5:number):Promise<Array<lsp.FrontendCodeAction>>;
 
 export function LSPCompletions(arg1:string,arg2:number,arg3:number):Promise<Array<lsp.FrontendCompletion>>;
 
@@ -121,6 +142,8 @@ export function LSPDidChange(arg1:string,arg2:string):Promise<void>;
 export function LSPDidOpen(arg1:string,arg2:string):Promise<void>;
 
 export function LSPHover(arg1:string,arg2:number,arg3:number):Promise<lsp.Hover>;
+
+export function LSPReferences(arg1:string,arg2:number,arg3:number,arg4:boolean):Promise<Array<lsp.FrontendLocation>>;
 
 export function LSPShutdown():Promise<void>;
 
@@ -144,11 +167,17 @@ export function ReadFile(arg1:string):Promise<string>;
 
 export function ReadFileWithLSP(arg1:string):Promise<string>;
 
+export function RemoveLSPServer(arg1:string):Promise<void>;
+
 export function RemoveMCPServer(arg1:string):Promise<void>;
 
 export function RenameFile(arg1:string,arg2:string):Promise<void>;
 
 export function ReplaceInFiles(arg1:string,arg2:string,arg3:files.SearchOptions):Promise<void>;
+
+export function RespondToAsk(arg1:tools.AskUserResponse):Promise<boolean>;
+
+export function RespondToolApproval(arg1:string,arg2:boolean):Promise<boolean>;
 
 export function SaveConversation(arg1:memory.Conversation):Promise<void>;
 
@@ -169,6 +198,8 @@ export function SearchFiles(arg1:string,arg2:files.SearchOptions):Promise<Array<
 export function SetProjectPath(arg1:string):Promise<void>;
 
 export function SetProviderConfig(arg1:string,arg2:provider.ProviderConfig):Promise<void>;
+
+export function SetProxy(arg1:string,arg2:string):Promise<void>;
 
 export function SetToolAutoApprove(arg1:string,arg2:boolean):Promise<void>;
 

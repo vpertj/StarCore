@@ -14,8 +14,8 @@ type GetGitDiffTool struct{}
 
 func NewGetGitDiffTool() *GetGitDiffTool { return &GetGitDiffTool{} }
 
-func (t *GetGitDiffTool) ID() string          { return "get_git_diff" }
-func (t *GetGitDiffTool) Name() string        { return "Get Git Info" }
+func (t *GetGitDiffTool) ID() string             { return "get_git_diff" }
+func (t *GetGitDiffTool) Name() string           { return "Get Git Info" }
 func (t *GetGitDiffTool) RequiresApproval() bool { return false }
 
 func (t *GetGitDiffTool) Description() string {
@@ -26,8 +26,8 @@ func (t *GetGitDiffTool) Parameters() agent.ToolParameters {
 	return agent.ToolParameters{
 		Type: "object",
 		Properties: map[string]agent.ToolParamProp{
-			"path":    {Type: "string", Description: "Repository path"},
-			"action":  {Type: "string", Description: "One of: diff, status, log (default: status)"},
+			"path":   {Type: "string", Description: "Repository path"},
+			"action": {Type: "string", Description: "One of: diff, status, log (default: status)"},
 		},
 		Required: []string{"path"},
 	}

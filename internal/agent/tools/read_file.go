@@ -14,8 +14,8 @@ type ReadFileTool struct{}
 
 func NewReadFileTool() *ReadFileTool { return &ReadFileTool{} }
 
-func (t *ReadFileTool) ID() string          { return "read_file" }
-func (t *ReadFileTool) Name() string        { return "Read File" }
+func (t *ReadFileTool) ID() string             { return "read_file" }
+func (t *ReadFileTool) Name() string           { return "Read File" }
 func (t *ReadFileTool) RequiresApproval() bool { return false }
 
 func (t *ReadFileTool) Description() string {
@@ -35,6 +35,7 @@ func (t *ReadFileTool) Parameters() agent.ToolParameters {
 }
 
 func (t *ReadFileTool) Execute(ctx context.Context, args map[string]any) (string, error) {
+	_ = ctx
 	path, ok := args["path"].(string)
 	if !ok || path == "" {
 		// Try common project files first

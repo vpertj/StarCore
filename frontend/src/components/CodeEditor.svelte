@@ -1,7 +1,7 @@
 <script>
  import { onMount, onDestroy } from 'svelte'
   import { EditorState, Compartment } from '@codemirror/state'
- import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, WidgetType, Decoration } from '@codemirror/view'
+ import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, WidgetType, Decoration, drawSelection } from '@codemirror/view'
  import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
  import { syntaxHighlighting, defaultHighlightStyle, HighlightStyle } from '@codemirror/language'
  import { tags } from '@lezer/highlight'
@@ -18,7 +18,8 @@
  import { php } from '@codemirror/lang-php'
  import { sql } from '@codemirror/lang-sql'
  import { xml } from '@codemirror/lang-xml'
- import { yaml } from '@codemirror/lang-yaml'
+  import { yaml } from '@codemirror/lang-yaml'
+  import { vue } from '@codemirror/lang-vue'
  import { StateField, StateEffect } from '@codemirror/state'
  import { linter, lintGutter } from '@codemirror/lint'
  import { syntaxTree } from '@codemirror/language'
@@ -28,7 +29,7 @@
  import { EventsOn } from '../../wailsjs/runtime/runtime.js'
  import { activeProviderId } from '../stores/provider.js'
  import { debouncedRequestCompletion, requestCompletion, dismissCompletion, cancelPendingCompletion, completionVisible, completionLoading, completionText, completionConfig } from '../stores/completion.js'
- import { activeFileContent, selectedCode } from '../stores/ai.js'
+  import { activeFileContent, selectedCode, sendMessage } from '../stores/ai.js'
  import { diagnostics as diagnosticsStore, activeFileDiagnostics } from '../stores/diagnostics.js'
  import { currentTheme, getThemeById } from '../stores/theme.js'
 
@@ -44,31 +45,50 @@
   /** @type {(() => void)|null} */ let settingsUnsubscribe = null
   /** @type {(() => void)|null} */ let themeUnsub = null
   /** @type {(() => void)|null} */ let fileChangeUnsubscribe = null
- let lspDiagUnsubscribe = null
-  let mounted = false
-  let lastSettingsJSON = ''
+  let lspDiagUnsubscribe = null
+   let mounted = false
+   let lastSettingsJSON = ''
+  let contextMenuVisible = $state(false)
+  let contextMenuPos = $state({ x: 0, y: 0 })
+  let aiToolbarVisible = $state(false)
+  let aiToolbarPos = $state({ x: 0, y: 0 })
 
- function getLanguageFromPath(path) {
-   if (!path) return 'plaintext'
-   const ext = path.split('.').pop()?.toLowerCase() || ''
-   switch (ext) {
-     case 'go': return 'go'
-     case 'js': case 'mjs': case 'cjs': case 'ts': case 'tsx': return 'javascript'
-     case 'json': return 'json'
-     case 'html': case 'htm': return 'html'
-     case 'css': case 'scss': case 'sass': case 'less': return 'css'
-     case 'md': case 'markdown': return 'markdown'
-     case 'py': case 'python': return 'python'
-     case 'rs': case 'rust': return 'rust'
-     case 'java': return 'java'
-     case 'cpp': case 'c': case 'h': case 'hpp': return 'cpp'
-     case 'php': return 'php'
-     case 'sql': return 'sql'
-     case 'xml': case 'svg': return 'xml'
-     case 'yaml': case 'yml': return 'yaml'
-     default: return 'plaintext'
-   }
- }
+  function getLanguageFromPath(path) {
+    if (!path) return 'plaintext'
+    const basename = path.split(/[\\/]/).pop()?.toLowerCase() || ''
+    if (basename === 'go.mod' || basename === 'go.sum') return 'gomod'
+    if (basename === 'makefile' || basename === 'dockerfile' || basename === 'rakefile') return 'bash'
+    if (basename === '.gitignore' || basename === '.dockerignore') return 'bash'
+    if (basename === 'cmakelists.txt' || basename.endsWith('.cmake')) return 'bash'
+    if (basename === 'package.json' || basename === 'tsconfig.json') return 'json'
+    if (basename === '.env' || basename.startsWith('.env.')) return 'bash'
+    const ext = path.split('.').pop()?.toLowerCase() || ''
+    switch (ext) {
+      case 'go': return 'go'
+      case 'js': case 'mjs': case 'cjs': return 'javascript'
+      case 'ts': case 'tsx': return 'typescript'
+      case 'json': return 'json'
+      case 'html': case 'htm': return 'html'
+      case 'css': case 'scss': case 'sass': case 'less': return 'css'
+      case 'md': case 'markdown': return 'markdown'
+      case 'py': case 'python': return 'python'
+      case 'rs': case 'rust': return 'rust'
+      case 'java': return 'java'
+      case 'cpp': case 'c': case 'h': case 'hpp': return 'cpp'
+      case 'php': return 'php'
+      case 'sql': return 'sql'
+      case 'xml': case 'svg': return 'xml'
+      case 'yaml': case 'yml': return 'yaml'
+      case 'vue': return 'vue'
+      case 'cs': return 'csharp'
+      case 'sh': case 'bash': return 'bash'
+      case 'rb': return 'ruby'
+      case 'lua': return 'lua'
+      case 'dockerfile': return 'dockerfile'
+      case 'tf': case 'tfvars': return 'terraform'
+      default: return 'plaintext'
+    }
+  }
 
   /** @type {import('@codemirror/lint').Diagnostic[]} */ let currentDiagnostics = []
 
@@ -190,26 +210,37 @@
   }
 
   function getLanguageExtension(path) {
-   if (!path) return null
-   const ext = path.split('.').pop()?.toLowerCase() || ''
-   switch (ext) {
-     case 'go': return go()
-     case 'js': case 'mjs': case 'cjs': case 'ts': case 'tsx': return javascript()
-     case 'json': return json()
-     case 'html': case 'htm': return html()
-     case 'css': case 'scss': case 'sass': case 'less': return css()
-     case 'md': case 'markdown': return markdown()
-     case 'py': case 'python': return python()
-     case 'rs': case 'rust': return rust()
-     case 'java': return java()
-     case 'cpp': case 'c': case 'h': case 'hpp': return cpp()
-     case 'php': return php()
-     case 'sql': return sql()
-     case 'xml': case 'svg': return xml()
-     case 'yaml': case 'yml': return yaml()
-     default: return null
-   }
- }
+    if (!path) return null
+    const basename = path.split(/[\\/]/).pop()?.toLowerCase() || ''
+    if (basename === 'go.mod' || basename === 'go.sum') return markdown()
+    if (basename === 'makefile' || basename === 'dockerfile' || basename === 'rakefile') return javascript()
+    if (basename === '.gitignore' || basename === '.dockerignore') return javascript()
+    if (basename === 'cmakelists.txt' || basename.endsWith('.cmake')) return javascript()
+    if (basename === 'package.json' || basename === 'tsconfig.json') return json()
+    if (basename === '.env' || basename.startsWith('.env.')) return javascript()
+    const ext = path.split('.').pop()?.toLowerCase() || ''
+    switch (ext) {
+      case 'go': return go()
+      case 'js': case 'mjs': case 'cjs': return javascript()
+      case 'ts': return javascript({ typescript: true })
+      case 'tsx': return javascript({ typescript: true, jsx: true })
+      case 'json': return json()
+      case 'html': case 'htm': return html()
+      case 'css': case 'scss': case 'sass': case 'less': return css()
+      case 'md': case 'markdown': return markdown()
+      case 'py': case 'python': return python()
+      case 'rs': case 'rust': return rust()
+      case 'java': return java()
+      case 'cpp': case 'c': case 'h': case 'hpp': return cpp()
+      case 'php': return php()
+      case 'sql': return sql()
+      case 'xml': case 'svg': return xml()
+      case 'yaml': case 'yml': return yaml()
+      case 'vue': return vue()
+      case 'cs': return cpp()
+      default: return null
+    }
+  }
 
  async function loadFileContent(filePath) {
    if (!filePath) {
@@ -275,6 +306,7 @@
      highlightActiveLineGutter(),
      lintGutter(),
      customLinter,
+     drawSelection(),
      history(),
      keymap.of([
        ...defaultKeymap,
@@ -329,15 +361,24 @@
          activeFileContent.set(content)
          triggerCompletion(filePath, false)
        }
-       if (update.selectionSet) {
-         const sel = update.state.selection.main
-         if (sel.from !== sel.to) {
-           selectedCode.set(update.state.doc.sliceString(sel.from, sel.to))
-         } else {
-           selectedCode.set('')
-         }
-       }
-     }),
+        if (update.selectionSet) {
+          const sel = update.state.selection.main
+          if (sel.from !== sel.to) {
+            const code = update.state.doc.sliceString(sel.from, sel.to)
+            selectedCode.set(code)
+            const coords = view.coordsAtPos(sel.head)
+            setTimeout(() => {
+              if (coords) {
+                aiToolbarPos = { x: coords.right + 4, y: coords.top - 2 }
+              }
+              aiToolbarVisible = code.trim().length > 0
+            })
+          } else {
+            selectedCode.set('')
+            setTimeout(() => { aiToolbarVisible = false })
+          }
+        }
+      }),
      completionField,
      EditorView.theme({
        '&': { height: '100%', backgroundColor: 'var(--bg-primary)' },
@@ -366,8 +407,10 @@
        },
        '.cm-activeLine': { backgroundColor: 'rgba(255, 255, 255, 0.03)' },
        '.cm-activeLineGutter': { backgroundColor: 'rgba(255, 255, 255, 0.04)', color: '#999999' },
-       '.cm-selectionBackground': { backgroundColor: 'rgba(86, 156, 214, 0.25)' },
-       '&.cm-focused .cm-selectionBackground': { backgroundColor: 'rgba(86, 156, 214, 0.25)' },
+        '.cm-selectionBackground': { backgroundColor: 'rgba(0, 80, 200, 0.35) !important' },
+        '&.cm-focused .cm-selectionBackground': { backgroundColor: 'rgba(0, 80, 200, 0.35) !important' },
+        '.cm-selectionLayer .cm-selectionBackground': { backgroundColor: 'rgba(0, 80, 200, 0.35) !important' },
+        '.cm-layer-selection': { backgroundColor: 'rgba(0, 80, 200, 0.35) !important' },
        '&.cm-focused .cm-cursor': { borderLeftColor: getStoreValue(editorSettings).cursorColor, borderLeftWidth: getStoreValue(editorSettings).cursorWidth + 'px' },
        '.cm-cursor': { borderLeftColor: getStoreValue(editorSettings).cursorColor, borderLeftWidth: getStoreValue(editorSettings).cursorWidth + 'px' },
        '.cm-cursorDrop': { borderLeftColor: getStoreValue(editorSettings).cursorColor },
@@ -425,9 +468,46 @@
      console.error('Failed to init editor:', err)
    }
    return () => { if (typeof settingsUnsub === 'function') settingsUnsub() }
- }
+  }
 
- function triggerCompletion(filePath, instant) {
+  function handleContextMenu(e) {
+    e.preventDefault()
+    const sel = view?.state.selection.main
+    if (sel && sel.from !== sel.to) {
+      const code = view.state.doc.sliceString(sel.from, sel.to)
+      if (code.trim()) {
+        contextMenuPos = { x: e.clientX, y: e.clientY }
+        contextMenuVisible = true
+        return
+      }
+    }
+    contextMenuVisible = false
+  }
+
+  function hideContextMenu() {
+    contextMenuVisible = false
+  }
+
+  function aiAction(action) {
+    const sel = view?.state.selection.main
+    if (!sel || sel.from === sel.to) return
+    const code = view.state.doc.sliceString(sel.from, sel.to)
+    if (!code?.trim()) return
+    hideContextMenu()
+    aiToolbarVisible = false
+    const prompts = {
+      explain: `请解释以下代码：\n\`\`\`\n${code}\n\`\`\``,
+      translate: `请将以下代码翻译为中文注释并解释：\n\`\`\`\n${code}\n\`\`\``,
+      refactor: `请重构以下代码，给出改进建议：\n\`\`\`\n${code}\n\`\`\``,
+      'generate-test': `请为以下代码生成单元测试：\n\`\`\`\n${code}\n\`\`\``,
+      'generate-doc': `请为以下代码生成文档注释：\n\`\`\`\n${code}\n\`\`\``,
+      review: `请审查以下代码，指出问题：\n\`\`\`\n${code}\n\`\`\``,
+      optimize: `请优化以下代码的性能：\n\`\`\`\n${code}\n\`\`\``,
+    }
+    sendMessage(prompts[action] || prompts.explain)
+  }
+
+  function triggerCompletion(filePath, instant) {
    if (!view || !filePath) return
    const config = getStoreValue(completionConfig)
    if (!config.enabled) return
@@ -472,22 +552,13 @@
     const layer = v.dom.querySelector('.cm-cursorLayer')
     const cursor = v.dom.querySelector('.cm-cursor')
     if (!layer || !cursor) return
-    // Cursor height
     cursor.style.height = (s.cursorHeight || 100) + '%'
-    // Blink style: set inline animation on cursor layer (overrides CM defaults)
     const style = s.cursorBlinkStyle || 'blink'
-    if (style === 'solid') {
-      layer.style.animation = 'none'
-    } else if (style === 'smooth') {
-      layer.style.animation = 'cm-smooth 1.06s ease-in-out infinite'
-    } else if (style === 'phase') {
-      layer.style.animation = 'cm-phase 1.06s ease-in-out infinite'
-    } else if (style === 'expand') {
-      layer.style.animation = 'cm-expand 1.06s ease-in-out infinite'
-    } else {
-      layer.style.animation = 'cm-blink 1.06s steps(1) infinite'
-    }
-    // Style
+    if (style === 'solid') layer.style.animation = 'none'
+    else if (style === 'smooth') layer.style.animation = 'cm-smooth 1.06s ease-in-out infinite'
+    else if (style === 'phase') layer.style.animation = 'cm-phase 1.06s ease-in-out infinite'
+    else if (style === 'expand') layer.style.animation = 'cm-expand 1.06s ease-in-out infinite'
+    else layer.style.animation = 'cm-blink 1.06s steps(1) infinite'
     if (s.cursorStyle === 'line') {
       cursor.style.borderLeft = s.cursorWidth + 'px solid ' + s.cursorColor
       cursor.style.background = 'none'
@@ -561,6 +632,15 @@
       onFileChanged(e.detail?.path || '')
     }
     window.addEventListener('file-changed', onDomFileChanged)
+
+    // Listen for AI file modifications (write/edit tool) — auto-open and highlight
+    const onAIFileModified = (/** @type {CustomEvent} */ e) => {
+      const modifiedPath = e.detail?.path
+      if (!modifiedPath) return
+      // Open the modified file in the editor
+      activeFile.set(modifiedPath)
+    }
+    window.addEventListener('ai:file-modified', onAIFileModified)
 
     function onFileChanged(changedPath) {
       if (!changedPath || !view || changedPath !== lastFilePath) return
@@ -637,6 +717,8 @@
       view.destroy()
       view = null
     }
+    window.removeEventListener('file-changed', onDomFileChanged)
+    window.removeEventListener('ai:file-modified', onAIFileModified)
     cancelPendingCompletion()
     window.removeEventListener('keydown', handleKeyDown)
     window.removeEventListener('insert-code', handleInsertCode)
@@ -691,20 +773,86 @@
     bind:this={editorContainer}
     class="flex-1 overflow-hidden"
     style="background-color: var(--bg-primary);"
-    onclick={() => { view?.focus(); const ce = view?.dom.querySelector('.cm-content'); if (ce) ce.focus() }}
+    onclick={() => { view?.focus(); const ce = view?.dom.querySelector('.cm-content'); if (ce) ce.focus(); hideContextMenu(); aiToolbarVisible = false }}
+    oncontextmenu={handleContextMenu}
     onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { view?.focus(); const ce = view?.dom.querySelector('.cm-content'); if (ce) ce.focus() }}}
     role="button"
     tabindex="0"
     aria-label="Focus editor"
   ></div>
+
+  <!-- AI Floating Toolbar on selection -->
+  {#if aiToolbarVisible && $selectedCode?.trim()}
+    <div
+      class="fixed z-50 flex gap-0.5 rounded-md shadow-lg px-1 py-0.5"
+      style="left: {aiToolbarPos.x}px; top: {aiToolbarPos.y}px; background-color: var(--bg-secondary); border: 1px solid var(--border);"
+    >
+      <button class="ai-toolbar-btn" onclick={() => aiAction('explain')} title="AI 解释">💡</button>
+      <button class="ai-toolbar-btn" onclick={() => aiAction('refactor')} title="AI 重构">🔧</button>
+      <button class="ai-toolbar-btn" onclick={() => aiAction('generate-test')} title="AI 生成测试">🧪</button>
+      <button class="ai-toolbar-btn" onclick={() => aiAction('generate-doc')} title="AI 生成文档">📝</button>
+    </div>
+  {/if}
 </div>
 
+<!-- AI Context Menu on right-click -->
+{#if contextMenuVisible}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="fixed inset-0 z-40" onclick={hideContextMenu}></div>
+  <div
+    class="fixed z-50 rounded shadow-lg py-1 min-w-40"
+    style="left: {contextMenuPos.x}px; top: {contextMenuPos.y}px; background-color: var(--bg-primary); border: 1px solid var(--border);"
+  >
+    <div class="px-3 py-1 text-xs font-medium" style="color: var(--text-muted);">AI Actions</div>
+    <button class="context-menu-item" onclick={() => aiAction('explain')}>💡 {$t('editor.ai.explain')}</button>
+    <button class="context-menu-item" onclick={() => aiAction('translate')}>🌐 {$t('editor.ai.translate')}</button>
+    <button class="context-menu-item" onclick={() => aiAction('refactor')}>🔧 {$t('editor.ai.refactor')}</button>
+    <button class="context-menu-item" onclick={() => aiAction('optimize')}>⚡ {$t('editor.ai.optimize')}</button>
+    <div class="border-t my-1" style="border-color: var(--border);"></div>
+    <button class="context-menu-item" onclick={() => aiAction('generate-test')}>🧪 {$t('editor.ai.generateTest')}</button>
+    <button class="context-menu-item" onclick={() => aiAction('generate-doc')}>📝 {$t('editor.ai.generateDoc')}</button>
+    <button class="context-menu-item" onclick={() => aiAction('review')}>🔍 {$t('editor.ai.review')}</button>
+  </div>
+{/if}
+
 <style>
-:global(.cm-editor .cm-content) {
-  caret-color: transparent;
+/* Keep drawSelection layer at full opacity to prevent color shift */
+:global(.cm-editor .cm-selectionLayer) {
+  opacity: 1 !important;
 }
 
+.ai-toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  background: transparent;
+  transition: background-color 0.15s;
+}
+.ai-toolbar-btn:hover {
+  background-color: var(--selection);
+}
 
+.context-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 4px 12px;
+  font-size: 12px;
+  border: none;
+  cursor: pointer;
+  background: transparent;
+  color: var(--text-primary);
+  transition: background-color 0.1s;
+}
+.context-menu-item:hover {
+  background-color: var(--selection);
+}
 
 /* Cursor blink animations */
 :global(.cm-cursor-blink) { animation: cm-blink 1.06s steps(1) infinite; }

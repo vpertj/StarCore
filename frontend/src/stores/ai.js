@@ -46,7 +46,9 @@ export const selectedCode = writable('')
 export const aiMode = writable('chat')
 export const detectedMode = writable('chat')
 export const connectionStatus = writable(/** @type {'ok'|'warning'|'error'} */ ('ok'))
-export const toolCalls = writable(/** @type {{id: string, name: string, args: any, status: string, result?: string, error?: string}[]} */ ([]))
+export const toolCalls = writable(/** @type {{id: string, name: string, args: any, status: string, result?: string, error?: string, fileMeta?: {operation: string, filePath: string, startLine?: number, endLine?: number, summary?: string}}[]} */ ([]))
+export const pendingAsk = writable(/** @type {{id: string, question: string, options: string[]}|null} */ (null))
+export const loopExhausted = writable(/** @type {{maxLoops: number, mode: string, progress: string}|null} */ (null))
 
 /**
  * @param {string|Error} err
@@ -79,7 +81,16 @@ export function retryLastMessage() {
   if (lastUserMessage) {
     const msg = lastUserMessage
     lastUserMessage = null
-    clearMessages().then(() => sendMessage(msg))
+    // Persist current messages, then clear without generating a new conversationId
+    persistMessages().then(() => {
+      messages.set([])
+      toolCalls.set([])
+      thinkingContent.set('')
+      contextFiles.set([])
+      contextCode.set('')
+      // Keep the same conversationId so the retry is in the same conversation
+      sendMessage(msg)
+    })
   }
 }
 
@@ -227,6 +238,7 @@ export async function clearMessages() {
   thinkingContent.set('')
   contextFiles.set([])
   contextCode.set('')
+  lastUserMessage = null
   // Generate a fresh conversation ID for the new chat
   activeConversationId.set('conv_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8))
 }
@@ -247,11 +259,17 @@ export function saveAIConfig(config) {
 export async function approveToolCall(callId) {
   toolCalls.update(cs => cs.map(c => c.id === callId ? { ...c, status: 'executing' } : c))
   EventsEmit('tool:approve:' + callId, true)
+  if (window.backend?.RespondToolApproval) {
+    window.backend.RespondToolApproval(callId, true).catch(() => {})
+  }
 }
 
 export function rejectToolCall(callId) {
   toolCalls.update(cs => cs.map(c => c.id === callId ? { ...c, status: 'rejected' } : c))
   EventsEmit('tool:approve:' + callId, false)
+  if (window.backend?.RespondToolApproval) {
+    window.backend.RespondToolApproval(callId, false).catch(() => {})
+  }
 }
 
 /** @type {(() => void)|null} */ let currentCleanup = null
@@ -261,7 +279,17 @@ export function stopGenerating() {
     currentCleanup()
     currentCleanup = null
   }
+  if (window.backend?.StopGenerating) {
+    window.backend.StopGenerating().catch(() => {})
+  }
   isGenerating.set(false)
+}
+
+export function continueLoop(extraLoops = 10) {
+  if (window.backend?.ContinueAgentLoop) {
+    window.backend.ContinueAgentLoop(extraLoops).catch(() => {})
+  }
+  loopExhausted.set(null)
 }
 
 /**
@@ -269,6 +297,11 @@ export function stopGenerating() {
  * @param {string[]} [attachedFiles]
  */
 export async function sendMessage(content, attachedFiles) {
+  // Cancel any ongoing generation before starting a new one
+  if (get(isGenerating)) {
+    stopGenerating()
+  }
+
   // Auto-generate a conversation ID if none exists (first message of a new chat)
   if (!get(activeConversationId)) {
     activeConversationId.set('conv_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8))
@@ -282,17 +315,19 @@ export async function sendMessage(content, attachedFiles) {
   const resolved = resolveModelProvider(modelCompositeId, rawProviderId, customModels)
   const providerId = resolved.providerId
   const model = resolved.model
+  console.log('[sendMessage] provider:', providerId, 'model:', model, 'hasApiKey:', !!resolved.apiKey, 'hasEndpoint:', !!resolved.endpoint)
 
   if (resolved.apiKey || resolved.endpoint) {
     try {
-      await window.backend.SetProviderConfig(providerId, {
+      /** @type {{id:string, name:string, enabled:boolean, apiKey?:string, endpoint?:string}} */
+      const cfg = {
         id: providerId,
         name: providerId,
-        apiKey: resolved.apiKey || '',
-        endpoint: resolved.endpoint || '',
         enabled: true,
-        isDefault: false,
-      })
+      }
+      if (resolved.apiKey) cfg.apiKey = resolved.apiKey
+      if (resolved.endpoint) cfg.endpoint = resolved.endpoint
+      await window.backend.SetProviderConfig(providerId, cfg)
     } catch (e) {
       console.error('Failed to set provider config:', e)
     }
@@ -303,11 +338,24 @@ export async function sendMessage(content, attachedFiles) {
   lastUserMessage = content
   connectionStatus.set('ok')
 
-  // Master mode: always Build (full tool access). Non-Master: always Chat.
+  // Auto-detect intent mode from message, but respect manual overrides.
+  // In Master mode: default to Build, allow Plan/Chat switching.
+  // In non-Master mode: default to Chat, allow Build/Plan for coding tasks.
+  const detected = detectMode(content)
   if (get(masterMode)) {
-    if (get(aiMode) !== 'build') aiMode.set('build')
+    // Master: auto-detect; if uncertain, default to build
+    if (detected !== 'chat' || get(aiMode) === 'plan') {
+      aiMode.set(detected === 'chat' ? 'build' : detected)
+    } else if (get(aiMode) !== 'build' && get(aiMode) !== 'plan') {
+      aiMode.set('build')
+    }
   } else {
-    if (get(aiMode) !== 'chat') aiMode.set('chat')
+    // Non-Master: default to chat, but allow build/plan for coding intents
+    if (detected === 'build' || detected === 'plan') {
+      aiMode.set(detected)
+    } else if (get(aiMode) !== 'chat' && get(aiMode) !== 'build' && get(aiMode) !== 'plan') {
+      aiMode.set('chat')
+    }
   }
 
   isGenerating.set(true)
@@ -413,6 +461,20 @@ export async function sendMessage(content, attachedFiles) {
           cancelAnimationFrame(rafId)
           rafId = null
         }
+        // Accumulate token usage in localStorage as fallback
+        try {
+          const userMsg = chatMessages.filter(m => m.role === 'user').pop()
+          const inputLen = userMsg?.content?.length || 0
+          const outputLen = assistantMessage.length
+          if (inputLen > 0 || outputLen > 0) {
+            const key = 'starcore-token-usage'
+            const saved = JSON.parse(localStorage.getItem(key) || '{"tokensIn":0,"tokensOut":0,"count":0}')
+            saved.tokensIn += Math.round(inputLen * 0.3)
+            saved.tokensOut += Math.round(outputLen * 0.3)
+            saved.count++
+            localStorage.setItem(key, JSON.stringify(saved))
+          }
+        } catch {}
         flushUpdate()
         connectionStatus.set('ok')
         cleanup()
@@ -440,33 +502,70 @@ export async function sendMessage(content, attachedFiles) {
       })
 
        const offToolCall = EventsOn(toolCallEvent, (/** @type {any} */ tc) => {
-         const id = tc.id || tc.ID || ''
-         const name = tc.name || tc.Name || 'tool'
-         const args = tc.args || tc.Args || {}
-         toolCalls.update(calls => [...calls, {
-           id,
-           name,
-           args,
-           status: 'pending_approval',
-         }])
-         addLog('AI', 'info', `${name}(${JSON.stringify(args).slice(0, 100)})`)
-         resetStreamTimeout()
-       })
+           const id = tc.id || tc.ID || ''
+           const name = tc.name || tc.Name || 'tool'
+           const args = tc.args || tc.Args || {}
+           const fileMeta = tc.fileMeta || null
+           toolCalls.update(calls => [...calls, {
+             id,
+             name,
+             args,
+             status: 'executing',
+             fileMeta,
+           }])
+           addLog('AI', 'info', `${name}(${JSON.stringify(args).slice(0, 100)})`)
+           resetStreamTimeout()
+         })
+
+        const toolApprovalEvent = 'ai:stream:tool_approval'
+        const offToolApproval = EventsOn(toolApprovalEvent, (/** @type {any} */ ta) => {
+          const id = ta.id || ta.ID || ''
+          const name = ta.name || ta.Name || 'tool'
+          const args = ta.args || ta.Args || {}
+          toolCalls.update(calls => {
+            const idx = calls.findIndex(c => c.id === id)
+            if (idx >= 0) {
+              calls[idx] = { ...calls[idx], status: 'pending_approval' }
+            } else {
+              calls.push({ id, name, args, status: 'pending_approval' })
+            }
+            return calls
+          })
+        })
 
        const offToolResult = EventsOn(toolResultEvent, (/** @type {any} */ tr) => {
-         toolCalls.update(calls => calls.map(c => {
-           if (c.id === tr.callId || c.id === tr.CallID) {
-             const status = tr.error ? 'error' : 'completed'
-             if (tr.error) addLog('AI', 'error', `${c.name}: ${tr.error}`)
-             return { ...c, status, result: tr.result || tr.Result || '', error: tr.error || tr.Error || '' }
-           }
-           return c
-         }))
-         resetStreamTimeout()
-       })
+          toolCalls.update(calls => calls.map(c => {
+            if (c.id === tr.callId || c.id === tr.CallID) {
+              const status = tr.error ? 'error' : 'completed'
+              if (tr.error) addLog('AI', 'error', `${c.name}: ${tr.error}`)
+              const fileMeta = tr.fileMeta || c.fileMeta
+              // Auto-open edited files in the editor
+              if (status === 'completed' && fileMeta && fileMeta.filePath &&
+                  (fileMeta.operation === 'write' || fileMeta.operation === 'edit')) {
+                const detail = { path: fileMeta.filePath }
+                if (fileMeta.startLine) detail.startLine = fileMeta.startLine
+                if (fileMeta.endLine) detail.endLine = fileMeta.endLine
+                window.dispatchEvent(new CustomEvent('ai:file-modified', { detail }))
+              }
+              return { ...c, status, result: tr.result || tr.Result || '', error: tr.error || tr.Error || '', fileMeta }
+            }
+            return c
+          }))
+          resetStreamTimeout()
+        })
 
       const offSummarized = EventsOn(summarizedEvent, (msg) => {
         addMessage('system', `📝 ${msg}`)
+      })
+
+      const askUserEvent = 'ai:stream:ask_user'
+      const offAskUser = EventsOn(askUserEvent, (/** @type {{id:string,question:string,options?:string[]}} */ data) => {
+        pendingAsk.set({ id: data.id, question: data.question, options: data.options || [] })
+      })
+
+      const loopExhaustedEvent = 'ai:stream:loop_exhausted'
+      const offLoopExhausted = EventsOn(loopExhaustedEvent, (/** @type {{maxLoops:number, mode:string, progress:string}} */ data) => {
+        loopExhausted.set(data)
       })
 
       function cleanup() {
@@ -477,8 +576,11 @@ export async function sendMessage(content, attachedFiles) {
         offDone()
         offError()
         offToolCall()
+        offToolApproval()
         offToolResult()
         offSummarized()
+        offAskUser()
+        offLoopExhausted()
         EventsOff(dataEvent)
         EventsOff(thinkingEvent)
         EventsOff(doneEvent)
@@ -486,6 +588,10 @@ export async function sendMessage(content, attachedFiles) {
         EventsOff(toolCallEvent)
         EventsOff(toolResultEvent)
         EventsOff(summarizedEvent)
+        EventsOff(askUserEvent)
+        EventsOff(loopExhaustedEvent)
+        pendingAsk.set(null)
+        loopExhausted.set(null)
         isGenerating.set(false)
         currentCleanup = null
         persistMessages()
@@ -502,12 +608,16 @@ export async function sendMessage(content, attachedFiles) {
   } catch (/** @type {any} */ err) {
     console.error('AI request failed:', err)
     updateLastMessage(`Error: ${err.message || String(err)}`)
-    isGenerating.set(false)
+    if (currentCleanup) {
+      currentCleanup()
+    } else {
+      isGenerating.set(false)
+    }
   }
   // isGenerating is set false by cleanup() in stream event handlers above
 }
 
-async function persistMessages() {
+export async function persistMessages() {
   try {
     const convId = get(activeConversationId)
     const msgs = get(messages)

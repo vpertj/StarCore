@@ -37,6 +37,7 @@ func (t *EditFileTool) Parameters() agent.ToolParameters {
 }
 
 func (t *EditFileTool) Execute(ctx context.Context, args map[string]any) (string, error) {
+	_ = ctx
 	path, _ := args["path"].(string)
 	oldStr, _ := args["old_string"].(string)
 	newStr, _ := args["new_string"].(string)

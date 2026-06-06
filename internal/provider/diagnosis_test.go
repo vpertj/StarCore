@@ -7,10 +7,10 @@ import (
 
 func TestDiagnoseError(t *testing.T) {
 	tests := []struct {
-		name        string
-		err         error
-		wantType    string
-		wantRetry   bool
+		name      string
+		err       error
+		wantType  string
+		wantRetry bool
 	}{
 		{"nil error", nil, "none", false},
 		{"auth 401", fmt.Errorf("API returned status 401"), "auth", false},

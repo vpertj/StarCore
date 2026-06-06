@@ -13,8 +13,8 @@ type WriteFileTool struct{}
 
 func NewWriteFileTool() *WriteFileTool { return &WriteFileTool{} }
 
-func (t *WriteFileTool) ID() string          { return "write_file" }
-func (t *WriteFileTool) Name() string        { return "Write File" }
+func (t *WriteFileTool) ID() string             { return "write_file" }
+func (t *WriteFileTool) Name() string           { return "Write File" }
 func (t *WriteFileTool) RequiresApproval() bool { return true }
 
 func (t *WriteFileTool) Description() string {
@@ -33,6 +33,7 @@ func (t *WriteFileTool) Parameters() agent.ToolParameters {
 }
 
 func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) (string, error) {
+	_ = ctx
 	path, ok := args["path"].(string)
 	if !ok {
 		return "", fmt.Errorf("path is required")
@@ -68,4 +69,3 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) (strin
 	diffStr := fmt.Sprintf("%+d", diffLines)
 	return fmt.Sprintf("✏️ Modified %s: %d→%d lines (%s), %d→%d bytes", path, oldLines, newLines, diffStr, len(oldContent), len(content)), nil
 }
-

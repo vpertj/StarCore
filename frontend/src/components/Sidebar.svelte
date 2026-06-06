@@ -1,6 +1,6 @@
 <script>
 import { activeView, sidebarVisible, sidebarWidth } from '../stores/ui.js'
-import { currentProject } from '../stores/app.js'
+import { currentProject, openProjectFolder, recentProjects, openProjectPath } from '../stores/app.js'
 import ProjectExplorer from './ProjectExplorer.svelte'
 import SearchPanel from './SearchPanel.svelte'
 import GitPanel from './GitPanel.svelte'
@@ -42,14 +42,7 @@ function getViewTitle() {
 }
 
 async function openFolder() {
-  try {
-    const folder = await window.backend.OpenFolder()
-    if (folder) {
-      currentProject.set(folder)
-    }
-  } catch (e) {
-    console.error('Failed to open folder:', e)
-  }
+  await openProjectFolder()
 }
 </script>
 
@@ -74,6 +67,21 @@ async function openFolder() {
             >
               {$t('openFolder')}
             </button>
+            {#if $recentProjects.length > 0}
+              <div class="w-full mt-2">
+                <p class="text-xs font-medium mb-2" style="color: var(--text-secondary);">{$t('recentProjects')}</p>
+                {#each $recentProjects as path}
+                  <button
+                    class="w-full text-left px-3 py-1.5 rounded text-xs truncate transition-colors hover:opacity-80"
+                    style="color: var(--text-primary); background-color: var(--bg-primary);"
+                    title={path}
+                    on:click={() => openProjectPath(path)}
+                  >
+                    {path.split(/[\\/]/).pop() || path}
+                  </button>
+                {/each}
+              </div>
+            {/if}
           </div>
         {:else}
           <ProjectExplorer />

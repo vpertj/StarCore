@@ -31,11 +31,11 @@ type Session struct {
 
 // Manager manages terminal sessions and their PTY processes.
 type Manager struct {
-	mu        sync.Mutex
-	sessions  map[string]*Session
-	idx       int
-	emitFn    EmitFunc
-	ctxDone   <-chan struct{}
+	mu       sync.Mutex
+	sessions map[string]*Session
+	idx      int
+	emitFn   EmitFunc
+	ctxDone  <-chan struct{}
 }
 
 // NewManager creates a new terminal manager.

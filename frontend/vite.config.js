@@ -37,7 +37,8 @@ export default defineConfig({
             '@codemirror/lang-rust',
             '@codemirror/lang-java',
             '@codemirror/lang-cpp',
-            '@codemirror/lang-php'
+            '@codemirror/lang-php',
+            '@codemirror/lang-vue'
           ],
           'vendor-xterm': ['@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-web-links']
         }

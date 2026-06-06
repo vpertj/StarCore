@@ -12,8 +12,8 @@ type GitCommitTool struct{}
 
 func NewGitCommitTool() *GitCommitTool { return &GitCommitTool{} }
 
-func (t *GitCommitTool) ID() string            { return "git_commit" }
-func (t *GitCommitTool) Name() string          { return "Git Commit" }
+func (t *GitCommitTool) ID() string             { return "git_commit" }
+func (t *GitCommitTool) Name() string           { return "Git Commit" }
 func (t *GitCommitTool) RequiresApproval() bool { return true }
 
 func (t *GitCommitTool) Description() string {
@@ -68,10 +68,11 @@ func (t *GitCommitTool) Execute(ctx context.Context, args map[string]any) (strin
 type GitPullTool struct{}
 
 const defaultRemote = "origin"
+
 func NewGitPullTool() *GitPullTool { return &GitPullTool{} }
 
-func (t *GitPullTool) ID() string            { return "git_pull" }
-func (t *GitPullTool) Name() string          { return "Git Pull" }
+func (t *GitPullTool) ID() string             { return "git_pull" }
+func (t *GitPullTool) Name() string           { return "Git Pull" }
 func (t *GitPullTool) RequiresApproval() bool { return true }
 
 func (t *GitPullTool) Description() string {
@@ -125,8 +126,8 @@ type GitPushTool struct{}
 
 func NewGitPushTool() *GitPushTool { return &GitPushTool{} }
 
-func (t *GitPushTool) ID() string            { return "git_push" }
-func (t *GitPushTool) Name() string          { return "Git Push" }
+func (t *GitPushTool) ID() string             { return "git_push" }
+func (t *GitPushTool) Name() string           { return "Git Push" }
 func (t *GitPushTool) RequiresApproval() bool { return true }
 
 func (t *GitPushTool) Description() string {
@@ -172,4 +173,3 @@ func (t *GitPushTool) Execute(ctx context.Context, args map[string]any) (string,
 	}
 	return strings.TrimSpace(output), nil
 }
-

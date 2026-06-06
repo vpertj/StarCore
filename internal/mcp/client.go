@@ -111,6 +111,7 @@ func (c *MCPClient) loadResources(_ context.Context) {
 }
 
 func (c *MCPClient) CallTool(ctx context.Context, name string, args map[string]any) (string, error) {
+	_ = ctx
 	params := ToolCallParams{Name: name, Arguments: args}
 	resp, err := c.transport.Send("tools/call", params)
 	if err != nil {
@@ -136,6 +137,7 @@ func (c *MCPClient) CallTool(ctx context.Context, name string, args map[string]a
 }
 
 func (c *MCPClient) ReadResource(ctx context.Context, uri string) (string, error) {
+	_ = ctx
 	params := ResourceReadParams{URI: uri}
 	resp, err := c.transport.Send("resources/read", params)
 	if err != nil {

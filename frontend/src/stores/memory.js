@@ -85,17 +85,27 @@ export async function saveConversation(conv) {
  * @param {string} id
  */
 export async function deleteConversation(id) {
-  if (!window.backend?.DeleteConversation) return
   try {
-    await window.backend.DeleteConversation(id)
-    conversations.update(list => list.filter(c => c.id !== id))
-    const $activeConversationId = get(activeConversationId)
-    if ($activeConversationId === id) {
-      activeConversationId.set(null)
-      activeMessages.set([])
+    if (window.backend?.DeleteConversation) {
+      await window.backend.DeleteConversation(id)
     }
   } catch (/** @type {any} */ e) {
-    console.error('Failed to delete conversation:', e)
+    console.error('Failed to delete conversation from backend:', e)
+  }
+  // Always clean localStorage even if backend failed
+  try {
+    localStorage.removeItem(`starcore-messages-${id}`)
+    const saved = JSON.parse(localStorage.getItem(CONVERSATIONS_KEY) || '[]')
+    const filtered = saved.filter((/** @type {{id: string}} */ c) => c.id !== id)
+    localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(filtered))
+  } catch (/** @type {any} */ e) {
+    console.error('Failed to clean localStorage:', e)
+  }
+  conversations.update(list => list.filter(c => c.id !== id))
+  const $activeConversationId = get(activeConversationId)
+  if ($activeConversationId === id) {
+    activeConversationId.set(null)
+    activeMessages.set([])
   }
 }
 

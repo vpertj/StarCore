@@ -1,6 +1,6 @@
 <script>
 import { activeView, setActiveView, aiPanelVisible } from '../stores/ui.js'
-import { settingsVisible, currentProject } from '../stores/app.js'
+import { settingsVisible, currentProject, openProjectFolder } from '../stores/app.js'
 import { t } from '../stores/i18n.js'
 
 const views = [
@@ -27,14 +27,7 @@ function isActive(viewId) {
 }
 
 async function openFolder() {
-  try {
-    const folder = await window.backend.OpenFolder()
-    if (folder) {
-      currentProject.set(folder)
-    }
-  } catch (e) {
-    console.error('Failed to open folder:', e)
-  }
+  await openProjectFolder()
 }
 </script>
 

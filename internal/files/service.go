@@ -232,14 +232,14 @@ func matchesQuery(line, query string, options SearchOptions) bool {
 	}
 	if options.CaseSensitive {
 		if options.WholeWord {
-			return regexp.MustCompile(`\b`+regexp.QuoteMeta(query)+`\b`).MatchString(line)
+			return regexp.MustCompile(`\b` + regexp.QuoteMeta(query) + `\b`).MatchString(line)
 		}
 		return strings.Contains(line, query)
 	}
 	lineLower := strings.ToLower(line)
 	queryLower := strings.ToLower(query)
 	if options.WholeWord {
-		return regexp.MustCompile(`\b`+regexp.QuoteMeta(queryLower)+`\b`).MatchString(lineLower)
+		return regexp.MustCompile(`\b` + regexp.QuoteMeta(queryLower) + `\b`).MatchString(lineLower)
 	}
 	return strings.Contains(lineLower, queryLower)
 }

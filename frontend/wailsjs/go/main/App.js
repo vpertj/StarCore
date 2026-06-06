@@ -14,6 +14,10 @@ export function AICompletion(arg1, arg2) {
   return window['go']['main']['App']['AICompletion'](arg1, arg2);
 }
 
+export function AddLSPServer(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['AddLSPServer'](arg1, arg2, arg3, arg4);
+}
+
 export function AddMCPServer(arg1) {
   return window['go']['main']['App']['AddMCPServer'](arg1);
 }
@@ -24,6 +28,10 @@ export function AnalyzeProject(arg1) {
 
 export function ApplyDiff(arg1) {
   return window['go']['main']['App']['ApplyDiff'](arg1);
+}
+
+export function CheckCommandExists(arg1) {
+  return window['go']['main']['App']['CheckCommandExists'](arg1);
 }
 
 export function ClearTokenUsage() {
@@ -42,6 +50,10 @@ export function ConnectTerminal(arg1) {
   return window['go']['main']['App']['ConnectTerminal'](arg1);
 }
 
+export function ContinueAgentLoop(arg1) {
+  return window['go']['main']['App']['ContinueAgentLoop'](arg1);
+}
+
 export function CreateDir(arg1) {
   return window['go']['main']['App']['CreateDir'](arg1);
 }
@@ -54,12 +66,20 @@ export function DeleteConversation(arg1) {
   return window['go']['main']['App']['DeleteConversation'](arg1);
 }
 
+export function DeleteConversationMessages(arg1) {
+  return window['go']['main']['App']['DeleteConversationMessages'](arg1);
+}
+
 export function DeleteFile(arg1) {
   return window['go']['main']['App']['DeleteFile'](arg1);
 }
 
 export function DeleteKnowledge(arg1) {
   return window['go']['main']['App']['DeleteKnowledge'](arg1);
+}
+
+export function DeleteMessage(arg1) {
+  return window['go']['main']['App']['DeleteMessage'](arg1);
 }
 
 export function DeleteSkill(arg1) {
@@ -94,6 +114,14 @@ export function GetKnowledge(arg1) {
   return window['go']['main']['App']['GetKnowledge'](arg1);
 }
 
+export function GetLSPServers() {
+  return window['go']['main']['App']['GetLSPServers']();
+}
+
+export function GetLanguagePackages() {
+  return window['go']['main']['App']['GetLanguagePackages']();
+}
+
 export function GetMCPServers() {
   return window['go']['main']['App']['GetMCPServers']();
 }
@@ -112,6 +140,10 @@ export function GetProjectAnalysis(arg1) {
 
 export function GetProviders() {
   return window['go']['main']['App']['GetProviders']();
+}
+
+export function GetProxy() {
+  return window['go']['main']['App']['GetProxy']();
 }
 
 export function GetSkills() {
@@ -190,6 +222,10 @@ export function Greet(arg1) {
   return window['go']['main']['App']['Greet'](arg1);
 }
 
+export function InstallLanguagePackage(arg1) {
+  return window['go']['main']['App']['InstallLanguagePackage'](arg1);
+}
+
 export function InstallSkillFromURL(arg1) {
   return window['go']['main']['App']['InstallSkillFromURL'](arg1);
 }
@@ -204,6 +240,10 @@ export function KillTerminal(arg1) {
 
 export function LSPCloseFile(arg1) {
   return window['go']['main']['App']['LSPCloseFile'](arg1);
+}
+
+export function LSPCodeActions(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['LSPCodeActions'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function LSPCompletions(arg1, arg2, arg3) {
@@ -224,6 +264,10 @@ export function LSPDidOpen(arg1, arg2) {
 
 export function LSPHover(arg1, arg2, arg3) {
   return window['go']['main']['App']['LSPHover'](arg1, arg2, arg3);
+}
+
+export function LSPReferences(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['LSPReferences'](arg1, arg2, arg3, arg4);
 }
 
 export function LSPShutdown() {
@@ -270,6 +314,10 @@ export function ReadFileWithLSP(arg1) {
   return window['go']['main']['App']['ReadFileWithLSP'](arg1);
 }
 
+export function RemoveLSPServer(arg1) {
+  return window['go']['main']['App']['RemoveLSPServer'](arg1);
+}
+
 export function RemoveMCPServer(arg1) {
   return window['go']['main']['App']['RemoveMCPServer'](arg1);
 }
@@ -280,6 +328,14 @@ export function RenameFile(arg1, arg2) {
 
 export function ReplaceInFiles(arg1, arg2, arg3) {
   return window['go']['main']['App']['ReplaceInFiles'](arg1, arg2, arg3);
+}
+
+export function RespondToAsk(arg1) {
+  return window['go']['main']['App']['RespondToAsk'](arg1);
+}
+
+export function RespondToolApproval(arg1, arg2) {
+  return window['go']['main']['App']['RespondToolApproval'](arg1, arg2);
 }
 
 export function SaveConversation(arg1) {
@@ -320,6 +376,10 @@ export function SetProjectPath(arg1) {
 
 export function SetProviderConfig(arg1, arg2) {
   return window['go']['main']['App']['SetProviderConfig'](arg1, arg2);
+}
+
+export function SetProxy(arg1, arg2) {
+  return window['go']['main']['App']['SetProxy'](arg1, arg2);
 }
 
 export function SetToolAutoApprove(arg1, arg2) {

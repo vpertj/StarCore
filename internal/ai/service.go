@@ -15,8 +15,49 @@ import (
 	"StarCore/internal/provider"
 )
 
-const maxAgentLoops = 100
 const maxToolResultChars = 8000
+
+// calcMaxAgentLoops computes the maximum agent loop iterations based on mode and model.
+// chat: 10 (lightweight Q&A, rarely needs tools)
+// plan: 25 (read-only analysis, needs several file reads)
+// build: 15-60 (autonomous coding, depends on context window)
+func calcMaxAgentLoops(mode, model string) int {
+	ctxWindow := provider.EstimateContextWindow(model)
+	if ctxWindow <= 0 {
+		ctxWindow = 128000
+	}
+
+	switch mode {
+	case "chat":
+		return 10
+	case "plan":
+		return 25
+	case "build":
+		// Scale with context window: 32K→15, 128K→40, 200K→50, 1M→60
+		switch {
+		case ctxWindow >= 500000:
+			return 60
+		case ctxWindow >= 200000:
+			return 50
+		case ctxWindow >= 128000:
+			return 40
+		case ctxWindow >= 64000:
+			return 25
+		default:
+			return 15
+		}
+	default:
+		// Unknown mode — use a reasonable default
+		switch {
+		case ctxWindow >= 200000:
+			return 40
+		case ctxWindow >= 128000:
+			return 30
+		default:
+			return 20
+		}
+	}
+}
 
 // EmitFunc emits events to the Wails frontend.
 type EmitFunc func(event string, data interface{})
@@ -46,9 +87,13 @@ type Service struct {
 	contextWindow ContextWindowEstimator
 	appCtx        ContextProvider
 
-	mu           sync.Mutex
-	cancel       context.CancelFunc
-	fingerprints []string
+	loopState *agentTools.LoopState
+
+	mu            sync.Mutex
+	cancel        context.CancelFunc
+	fingerprints  []string
+	currentConvID string
+	continueCh    chan int // frontend can send extra loops via this channel
 }
 
 // NewService creates a new AI service.
@@ -63,6 +108,8 @@ func NewService(
 	contextWindow ContextWindowEstimator,
 	appCtx ContextProvider,
 ) *Service {
+	ls := agentTools.NewLoopState()
+	agentTools.LoopStateRef = ls
 	return &Service{
 		providerMgr:   providerMgr,
 		toolExec:      toolExec,
@@ -73,49 +120,52 @@ func NewService(
 		compress:      compress,
 		contextWindow: contextWindow,
 		appCtx:        appCtx,
+		loopState:     ls,
+		continueCh:    make(chan int, 1),
 	}
-}
-
-// estimateCost calculates approximate API cost based on model pricing.
-func estimateCost(model string, tokensIn, tokensOut int) float64 {
-	model = strings.ToLower(model)
-	inPrice := 0.0
-	outPrice := 0.0
-	switch {
-	case strings.Contains(model, "gpt-4o"):
-		inPrice, outPrice = 2.50, 10.00
-	case strings.Contains(model, "gpt-4"):
-		inPrice, outPrice = 30.00, 60.00
-	case strings.Contains(model, "gpt-3.5"):
-		inPrice, outPrice = 0.50, 1.50
-	case strings.Contains(model, "claude-opus"):
-		inPrice, outPrice = 15.00, 75.00
-	case strings.Contains(model, "claude-sonnet"):
-		inPrice, outPrice = 3.00, 15.00
-	case strings.Contains(model, "claude-haiku"):
-		inPrice, outPrice = 0.25, 1.25
-	case strings.Contains(model, "deepseek"):
-		inPrice, outPrice = 0.14, 0.28
-	default:
-		return 0
-	}
-	return (float64(tokensIn)*inPrice + float64(tokensOut)*outPrice) / 1_000_000
 }
 
 func estimateTokens(text string) int {
+	if len(text) == 0 {
+		return 0
+	}
 	cjk := 0
-	other := 0
+	asciiWords := 0
+	inWord := false
 	for _, r := range text {
 		if r >= 0x4E00 && r <= 0x9FFF || r >= 0x3400 && r <= 0x4DBF ||
 			r >= 0x3000 && r <= 0x303F || r >= 0xFF00 && r <= 0xFFEF ||
 			r >= 0x3040 && r <= 0x309F || r >= 0x30A0 && r <= 0x30FF ||
 			r >= 0xAC00 && r <= 0xD7AF {
 			cjk++
+			inWord = false
+		} else if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			if !inWord {
+				asciiWords++
+				inWord = true
+			}
 		} else {
-			other++
+			inWord = false
 		}
 	}
-	return int(float64(cjk)*1.5 + float64(other)*0.25)
+	// CJK: ~1.5 tokens per char (cl100k base)
+	// ASCII words: ~1.3 tokens per word (average English word)
+	// Whitespace/punctuation: ~0.5 tokens per char for remaining
+	remaining := len(text) - cjk*3 // rough byte adjustment
+	if remaining < 0 {
+		remaining = 0
+	}
+	nonWordChars := 0
+	for _, r := range text {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_') &&
+			!(r >= 0x4E00 && r <= 0x9FFF || r >= 0x3400 && r <= 0x4DBF ||
+				r >= 0x3000 && r <= 0x303F || r >= 0xFF00 && r <= 0xFFEF ||
+				r >= 0x3040 && r <= 0x309F || r >= 0x30A0 && r <= 0x30FF ||
+				r >= 0xAC00 && r <= 0xD7AF) {
+			nonWordChars++
+		}
+	}
+	return int(float64(cjk)*1.5+float64(asciiWords)*1.3+float64(nonWordChars)*0.4) + 1
 }
 
 func executeToolWithTimeout(ctx context.Context, executor *agent.ToolExecutor, call agent.ToolCall, timeout time.Duration) (*agent.ToolResult, error) {
@@ -248,11 +298,13 @@ const buildModePrompt = `
 === 构建模式 ===
 你是一个拥有完整文件系统访问权限的自主编程智能体。你的目标是精准、安全、高质量地完成每一个编程任务。
 
+**❗ 核心铁律：任务未完成之前绝对不要结束对话。** 实现代码后必须立即运行验证命令。验证失败 → 分析错误原因 → 修复代码 → 重新验证 → 反复循环直到通过。跳过验证步骤直接报告完成是绝对禁止的。只有所有改动验证通过、且用户需求全部实现后，你才能报告"已完成"。
+
 ## 执行纪律（每个任务严格遵循）
 1. **探索**：先阅读相关文件，理解当前实现。写出你的发现——不要只列文件名
 2. **规划**：说明你打算改什么、为什么这样改。对于非简单任务，先列出步骤再动手
 3. **实现**：使用工具完成修改。每次改动后简要说明改了什么
-4. **验证**：必须回读修改后的文件片段来确认改动正确
+4. **验证**：改完代码后必须运行验证命令。Go 项目跑 (go build ./...) 和 (go vet ./...)；前端项目跑 'npm run build'；有测试则跑测试。如果验证失败，分析错误并修复，直到通过
 5. **报告**：任务完成后总结所有变更
 
 ## 编码规范
@@ -325,6 +377,15 @@ func (s *Service) ChatStream(req provider.ChatRequest) error {
 	s.cancel = cancel
 	s.mu.Unlock()
 
+	// Reset loop state when starting a new conversation
+	if req.ConversationID != "" && req.ConversationID != s.currentConvID {
+		s.mu.Lock()
+		s.currentConvID = req.ConversationID
+		s.loopState.Reset()
+		s.fingerprints = nil
+		s.mu.Unlock()
+	}
+
 	if req.ProviderID == "" {
 		defProvider := s.providerMgr.GetDefaultProvider()
 		if defProvider != nil {
@@ -384,7 +445,7 @@ func (s *Service) ChatStream(req provider.ChatRequest) error {
 
 	contextMsg := s.buildContext(req)
 	if contextMsg != "" {
-		req.Messages = append([]provider.Message{{Role: "user", Content: contextMsg}}, req.Messages...)
+		req.Messages = append([]provider.Message{{Role: "system", Content: contextMsg}}, req.Messages...)
 	}
 
 	modelCtxWindow := s.contextWindow(req.ProviderID, req.Model)
@@ -394,6 +455,9 @@ func (s *Service) ChatStream(req provider.ChatRequest) error {
 	if didSummarize {
 		s.emitFn("ai:context:summarized", "上下文已自动压缩，旧消息摘要已保留")
 	}
+
+	// Start ask_user notification forwarder
+	go s.forwardAskUserRequests(agentCtx)
 
 	go s.runAgentLoop(req, agentCtx)
 
@@ -407,6 +471,18 @@ func (s *Service) Stop() {
 	if s.cancel != nil {
 		s.cancel()
 		s.cancel = nil
+	}
+}
+
+// ContinueLoop adds extra iterations to the running agent loop.
+// extraLoops is the number of additional loops to allow (e.g. 10 or 20).
+func (s *Service) ContinueLoop(extraLoops int) {
+	if extraLoops < 1 {
+		extraLoops = 10
+	}
+	select {
+	case s.continueCh <- extraLoops:
+	default:
 	}
 }
 
@@ -437,6 +513,26 @@ func (s *Service) Chat(req provider.ChatRequest) (string, error) {
 	resp, err := s.providerMgr.Chat(s.appCtx(), req)
 	if err != nil {
 		return "", err
+	}
+	// Record token usage for non-streaming Chat calls
+	if s.memoryStore != nil {
+		tokensIn := 0
+		for _, msg := range req.Messages {
+			tokensIn += estimateTokens(msg.Content)
+		}
+		tokensOut := estimateTokens(resp.Content)
+		if tokensIn > 0 || tokensOut > 0 {
+			go s.memoryStore.SaveTokenUsage(&memory.TokenUsageEntry{
+				ID:             fmt.Sprintf("tu_%d", time.Now().UnixNano()),
+				ConversationID: req.ConversationID,
+				ProviderID:     req.ProviderID,
+				Model:          req.Model,
+				TokensIn:       tokensIn,
+				TokensOut:      tokensOut,
+				Cost:           0,
+				CreatedAt:      time.Now().Format(time.RFC3339),
+			})
+		}
 	}
 	return resp.Content, nil
 }
@@ -539,15 +635,36 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 		}
 	}()
 
+	var prevMsgCount int
+	maxLoops := calcMaxAgentLoops(req.Mode, req.Model)
+	warningAt := maxLoops - 3
+	if warningAt < 1 {
+		warningAt = 1
+	}
 
-	for loop := 0; loop < maxAgentLoops; loop++ {
+	for loop := 0; loop < maxLoops; loop++ {
 		select {
 		case <-ctx.Done():
 			s.emitFn("ai:stream:done", "cancelled")
 			doneEmitted = true
 			return
+		case extra := <-s.continueCh:
+			maxLoops = loop + extra
+			warningAt = maxLoops - 3
+			if warningAt < loop+1 {
+				warningAt = maxLoops
+			}
+			s.emitFn("ai:stream:data", fmt.Sprintf("\n\n*已追加%d轮执行，当前上限%d轮。*", extra, maxLoops))
 		default:
 		}
+
+		// Inject project state (todo list, files touched, decisions) at start of each iteration
+		if stateSummary := s.loopState.ProjectStateSummary(); stateSummary != "" {
+			currentReq.Messages = append(currentReq.Messages, provider.Message{
+				Role: "system", Content: stateSummary,
+			})
+		}
+
 		roundCtx, roundCancel := context.WithTimeout(ctx, 180*time.Second)
 		eventCh, err := s.retryableChatStream(roundCtx, currentReq)
 		if err != nil {
@@ -567,7 +684,6 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 		var toolCalls []provider.ToolCall
 		toolCallsSeen := false
 		streamReceivedAny := false
-
 
 		for event := range eventCh {
 			streamReceivedAny = true
@@ -619,47 +735,48 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 					toolCallsSeen = true
 				}
 			case "done":
-				if !toolCallsSeen {
-					if assistantContent == "" {
-						noToolReq := currentReq
-						noToolReq.Tools = nil
-						noToolReq.Stream = false
-						fbCtx, fbCancel := context.WithTimeout(ctx, 45*time.Second)
-						resp, chatErr := s.providerMgr.Chat(fbCtx, noToolReq)
-						fbCancel()
-						if chatErr == nil && resp != nil && resp.Content != "" {
-							assistantContent = resp.Content
-							s.emitFn("ai:stream:data", resp.Content)
-						} else {
-							s.emitFn("ai:stream:error", "AI未返回任何内容。请检查网络连接或尝试换个问题。")
-							roundCancel()
-							doneEmitted = true
-							return
-						}
+				// Stream completed normally. If no tool calls and no content,
+				// try a non-streaming fallback. Otherwise just mark for exit.
+				if !toolCallsSeen && assistantContent == "" {
+					noToolReq := currentReq
+					noToolReq.Tools = nil
+					noToolReq.Stream = false
+					fbCtx, fbCancel := context.WithTimeout(ctx, 45*time.Second)
+					resp, chatErr := s.providerMgr.Chat(fbCtx, noToolReq)
+					fbCancel()
+					if chatErr == nil && resp != nil && resp.Content != "" {
+						assistantContent = resp.Content
+						s.emitFn("ai:stream:data", resp.Content)
 					}
-					estimatedTokensIn := 0
-					for _, msg := range currentReq.Messages {
-						estimatedTokensIn += estimateTokens(msg.Content)
-					}
-					estimatedTokensOut := estimateTokens(assistantContent)
-					if s.memoryStore != nil && (estimatedTokensIn > 0 || estimatedTokensOut > 0) {
-						usageEntry := &memory.TokenUsageEntry{
-							ID:             fmt.Sprintf("tu_%d", time.Now().UnixNano()),
-							ConversationID: currentReq.ConversationID,
-							ProviderID:     currentReq.ProviderID,
-							Model:          currentReq.Model,
-							TokensIn:       estimatedTokensIn,
-							TokensOut:      estimatedTokensOut,
-							Cost:           estimateCost(currentReq.Model, estimatedTokensIn, estimatedTokensOut),
-							CreatedAt:      time.Now().Format(time.RFC3339),
-						}
-						go s.memoryStore.SaveTokenUsage(usageEntry)
-					}
-					s.emitFn("ai:stream:done", "")
-					roundCancel()
-					doneEmitted = true
-					return
+					// Whether fallback succeeded or not, we'll exit after this
+					// (the post-loop no-tool-calls check handles it)
 				}
+			}
+		}
+
+		// Record token usage for THIS round only (delta, not cumulative history)
+		if s.memoryStore != nil && streamReceivedAny {
+			// Count only messages newly added this round (prompt tokens)
+			estimatedTokensIn := 0
+			currentMsgs := currentReq.Messages
+			for i := prevMsgCount; i < len(currentMsgs) && i >= 0; i++ {
+				estimatedTokensIn += estimateTokens(currentMsgs[i].Content)
+			}
+			prevMsgCount = len(currentMsgs)
+			// Count response tokens
+			estimatedTokensOut := estimateTokens(assistantContent)
+			if estimatedTokensIn > 0 || estimatedTokensOut > 0 {
+				usageEntry := &memory.TokenUsageEntry{
+					ID:             fmt.Sprintf("tu_%d", time.Now().UnixNano()),
+					ConversationID: currentReq.ConversationID,
+					ProviderID:     currentReq.ProviderID,
+					Model:          currentReq.Model,
+					TokensIn:       estimatedTokensIn,
+					TokensOut:      estimatedTokensOut,
+					Cost:           0,
+					CreatedAt:      time.Now().Format(time.RFC3339),
+				}
+				go s.memoryStore.SaveTokenUsage(usageEntry)
 			}
 		}
 
@@ -672,9 +789,15 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 		}
 
 		if !toolCallsSeen {
+			// No tool calls — AI is done talking. Emit and exit.
+			// If content was received via stream, it's already been emitted.
+			// If stream returned nothing, try one non-streaming fallback.
 			if assistantContent == "" {
 				fallbackCtx, fbCancel := context.WithTimeout(ctx, 60*time.Second)
-				resp, chatErr := s.providerMgr.Chat(fallbackCtx, currentReq)
+				noToolReq := currentReq
+				noToolReq.Tools = nil
+				noToolReq.Stream = false
+				resp, chatErr := s.providerMgr.Chat(fallbackCtx, noToolReq)
 				fbCancel()
 				if chatErr == nil && resp != nil && resp.Content != "" {
 					assistantContent = resp.Content
@@ -718,21 +841,53 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 			}
 			ch := make(chan toolRes, len(calls))
 			for _, call := range calls {
-				s.emitFn("ai:stream:tool_call", map[string]any{
+				emitData := map[string]any{
 					"id": call.ID, "name": call.Name, "args": call.Args, "loop": loop + 1,
-				})
+				}
+				if meta := extractFileMeta(call.Name, call.Args); meta != nil {
+					emitData["fileMeta"] = meta
+				}
+				s.emitFn("ai:stream:tool_call", emitData)
+				// Check if this tool needs approval
+				needsApproval := false
+				if t, ok := s.toolExec.Get(call.Name); ok {
+					needsApproval = t.RequiresApproval() && !s.toolExec.IsAutoApproved(call.Name)
+				}
+				if needsApproval {
+					s.emitFn("ai:stream:tool_approval", map[string]any{
+						"id": call.ID, "name": call.Name, "args": call.Args,
+					})
+				}
 				go func(c agent.ToolCall) {
-					r, e := executeToolWithTimeout(ctx, s.toolExec, c, 60*time.Second)
+					timeout := 60 * time.Second
+					if c.Name == "ask_user" {
+						timeout = 6 * time.Minute
+					}
+					if t, ok := s.toolExec.Get(c.Name); ok && t.RequiresApproval() {
+						timeout = 6 * time.Minute // allow time for user to approve
+					}
+					r, e := executeToolWithTimeout(ctx, s.toolExec, c, timeout)
 					ch <- toolRes{c, r, e}
 				}(call)
 			}
 			for i := 0; i < len(calls); i++ {
 				tr := <-ch
 				if tr.err != nil {
-					s.emitFn("ai:stream:tool_result", map[string]string{"callId": tr.call.ID, "name": tr.call.Name, "error": tr.err.Error()})
+					errData := map[string]string{"callId": tr.call.ID, "name": tr.call.Name, "error": tr.err.Error()}
+					s.emitFn("ai:stream:tool_result", errData)
 					currentReq.Messages = append(currentReq.Messages, provider.Message{Role: "tool", Content: fmt.Sprintf("Error: %s", tr.err.Error()), ToolCallID: tr.call.ID, Name: tr.call.Name})
 				} else {
-					s.emitFn("ai:stream:tool_result", tr.result)
+					if tr.result.FileMeta != nil {
+						resultMap := map[string]any{
+							"callId":   tr.result.CallID,
+							"name":     tr.result.Name,
+							"result":   tr.result.Result,
+							"fileMeta": tr.result.FileMeta,
+						}
+						s.emitFn("ai:stream:tool_result", resultMap)
+					} else {
+						s.emitFn("ai:stream:tool_result", tr.result)
+					}
 					rc := tr.result.Result
 					if len(rc) > maxToolResultChars {
 						rc = rc[:maxToolResultChars] + "... [truncated]"
@@ -742,31 +897,129 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 			}
 		}
 
-		if assistantContent == "" && len(toolCalls) > 0 {
-				currentReq.Messages = append(currentReq.Messages, provider.Message{
-					Role:    "system",
-					Content: "你调用了工具但没有解释在做什么。请在工具调用前后说明你的推理，简要总结你做了什么以及为什么。",
-				})
-			}
-
-			// Soft nudges for potential issues — never terminate, just guide.
-			if assistantContent == "" && !toolCallsSeen {
-				currentReq.Messages = append(currentReq.Messages, provider.Message{
-					Role:    "system",
-					Content: "上一轮没有产生任何输出。请检查工具执行结果，继续推进任务。如果任务已经完成，请向用户报告总结。",
-				})
-			}
-
-			if len(toolCalls) > 0 && assistantContent == "" && s.isRepeatedLoop(toolCalls) {
-				currentReq.Messages = append(currentReq.Messages, provider.Message{
-					Role:    "system",
-					Content: "你似乎陷入了重复模式。请回顾你的目标，尝试不同的方式：读取其他文件、换一个搜索策略、或者先分析当前进展再决定下一步。",
-				})
+		// Track files touched by write/edit tools
+		for _, tc := range toolCalls {
+			switch tc.Function.Name {
+			case "write_file", "edit_file":
+				var args map[string]any
+				if tc.Function.Arguments != "" {
+					json.Unmarshal([]byte(tc.Function.Arguments), &args)
+				}
+				if path, ok := args["path"].(string); ok && path != "" {
+					s.loopState.AddFileTouched(path)
+				}
 			}
 		}
 
-		// Agent loop exhausted (safety net) — deliver a graceful ending.
-		s.emitFn("ai:stream:data", "\n\n---\n*任务已达到最大执行轮次。如果任务未完成，请在新对话中继续。*")
-		s.emitFn("ai:stream:done", "")
-		doneEmitted = true
+		if assistantContent == "" && len(toolCalls) > 0 {
+			currentReq.Messages = append(currentReq.Messages, provider.Message{
+				Role:    "system",
+				Content: "ä½ è°ƒç”¨äº†å·¥å…·ä½†æ²¡æœ‰è§£é‡Šåœ¨åšä»€ä¹ˆã€‚è¯·åœ¨å·¥å…·è°ƒç”¨å‰åŽè¯´æ˜Žä½ çš„æŽ¨ç†ï¼Œç®€è¦æ»ç»“ä½ åšäº†ä»€ä¹ˆä»¥åŠ ä¸ºä»€ä¹ˆã€‚",
+			})
+		}
+
+		if len(toolCalls) > 0 && assistantContent == "" && s.isRepeatedLoop(toolCalls) {
+			currentReq.Messages = append(currentReq.Messages, provider.Message{
+				Role:    "system",
+				Content: "ä½ ä¼¼ä¹Žé™·å…¥äº†é‡å¤æ¨¡å¼ã€‚è¯·å›žé¡¾ä½ çš„ç›®æ ‡ï¼Œå°è¯•ä¸åŒçš„æ–¹å¼ï¼šè¯»å–å…¶ä»–æ–‡ä»¶ã€æ¢ä¸€ä¸ªæœç´¢ç–¥ç•¥ã€æˆ–è€…å…ˆåˆ†æžå½“å‰è¿›å±•å†å†³å®šä¸‹ä¸€æ¥ã€‚",
+			})
+		}
+
+		// Approaching loop limit — nudge AI to wrap up
+		if loop+1 >= warningAt && loop+1 < maxLoops {
+			remaining := maxLoops - loop - 1
+			currentReq.Messages = append(currentReq.Messages, provider.Message{
+				Role:    "system",
+				Content: fmt.Sprintf("[系统提醒] 还剩%d轮执行。如果任务尚未完成，请：1) 总结当前进度和已完成的变更；2) 说明剩余工作；3) 尽快完成最关键的操作。如果无法完成，给出清晰的续接指引。", remaining),
+			})
+		}
 	}
+
+	// Agent loop exhausted — save progress and notify frontend
+	progressSummary := s.loopState.ProjectStateSummary()
+	if progressSummary != "" && s.memoryStore != nil && req.ProjectPath != "" {
+		s.memoryStore.SaveKnowledge(&memory.Knowledge{
+			ID:          fmt.Sprintf("loop_progress_%d", time.Now().UnixNano()),
+			ProjectPath: req.ProjectPath,
+			Category:    "progress",
+			Key:         "loop_exhausted_progress",
+			Value:       progressSummary,
+			Source:      "auto",
+			UpdatedAt:   time.Now().Format(time.RFC3339),
+		})
+	}
+
+	s.emitFn("ai:stream:loop_exhausted", map[string]any{
+		"maxLoops": maxLoops,
+		"mode":     req.Mode,
+		"progress": progressSummary,
+	})
+	s.emitFn("ai:stream:done", "")
+	doneEmitted = true
+}
+
+// forwardAskUserRequests monitors the ask_user notification channel and
+// emits events to the Wails frontend so the user sees the question.
+func (s *Service) forwardAskUserRequests(ctx context.Context) {
+	ch := agentTools.PollAskUserRequests()
+	for {
+		select {
+		case req := <-ch:
+			s.emitFn("ai:stream:ask_user", req)
+		case <-ctx.Done():
+			// Drain remaining items to prevent stale requests from surfacing in the next conversation
+			for {
+				select {
+				case <-ch:
+				default:
+					return
+				}
+			}
+		}
+	}
+}
+
+// RespondToAsk is called from app.go (Wails) when the user answers an ask_user prompt.
+func (s *Service) RespondToAsk(response agentTools.AskUserResponse) bool {
+	return agentTools.AskUserReg.Respond(response)
+}
+
+// extractFileMeta extracts file operation metadata from tool call args.
+func extractFileMeta(name string, args map[string]any) *agent.FileMeta {
+	switch name {
+	case "read_file":
+		path, _ := args["path"].(string)
+		if path == "" {
+			return nil
+		}
+		return &agent.FileMeta{Operation: "read", FilePath: path}
+	case "write_file":
+		path, _ := args["path"].(string)
+		if path == "" {
+			return nil
+		}
+		return &agent.FileMeta{Operation: "write", FilePath: path}
+	case "edit_file":
+		path, _ := args["path"].(string)
+		if path == "" {
+			return nil
+		}
+		return &agent.FileMeta{Operation: "edit", FilePath: path}
+	case "search_files":
+		path, _ := args["path"].(string)
+		query, _ := args["query"].(string)
+		return &agent.FileMeta{Operation: "search", FilePath: path, Summary: query}
+	case "glob_files":
+		pattern, _ := args["pattern"].(string)
+		path, _ := args["path"].(string)
+		return &agent.FileMeta{Operation: "glob", FilePath: path, Summary: pattern}
+	case "execute_command":
+		cmd, _ := args["command"].(string)
+		if len(cmd) > 60 {
+			cmd = cmd[:60] + "..."
+		}
+		return &agent.FileMeta{Operation: "exec", Summary: cmd}
+	default:
+		return nil
+	}
+}

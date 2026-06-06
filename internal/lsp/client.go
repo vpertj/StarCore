@@ -11,14 +11,14 @@ import (
 )
 
 type Client struct {
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout *bufio.Reader
-	mu     sync.Mutex
-	idSeq  int
-	pending map[int]chan *Response
+	cmd            *exec.Cmd
+	stdin          io.WriteCloser
+	stdout         *bufio.Reader
+	mu             sync.Mutex
+	idSeq          int
+	pending        map[int]chan *Response
 	notifyHandlers map[string]func(params json.RawMessage)
-	done   chan struct{}
+	done           chan struct{}
 }
 
 func NewClient(command string, args ...string) (*Client, error) {
@@ -41,12 +41,12 @@ func NewClient(command string, args ...string) (*Client, error) {
 	}
 
 	c := &Client{
-		cmd:    cmd,
-		stdin:  stdin,
-		stdout: bufio.NewReader(stdout),
-		pending: make(map[int]chan *Response),
+		cmd:            cmd,
+		stdin:          stdin,
+		stdout:         bufio.NewReader(stdout),
+		pending:        make(map[int]chan *Response),
 		notifyHandlers: make(map[string]func(params json.RawMessage)),
-		done:   make(chan struct{}),
+		done:           make(chan struct{}),
 	}
 
 	go c.readLoop()
@@ -200,10 +200,9 @@ func (c *Client) readMessage() ([]byte, error) {
 func (c *Client) readStderr(r io.Reader) {
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
-		// Log stderr for debugging, but don't fail
-		line := scanner.Text()
-		_ = line // could log if needed
+		_ = scanner.Text()
 	}
+	_ = scanner.Err()
 }
 
 func rawMessage(v interface{}) *json.RawMessage {

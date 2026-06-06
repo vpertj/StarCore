@@ -94,6 +94,27 @@ func (s *Store) DeleteConversation(id string) error {
 	return tx.Commit()
 }
 
+func (s *Store) DeleteMessage(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var convID string
+	if err := tx.QueryRow("SELECT conversation_id FROM messages WHERE id = ?", id).Scan(&convID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM messages WHERE id = ?", id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("UPDATE conversations SET message_count = message_count - 1, updated_at = ? WHERE id = ?", now(), convID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) SaveMessage(msg *Message) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

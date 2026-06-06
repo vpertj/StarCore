@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -16,12 +17,12 @@ type SearchFilesTool struct{}
 
 func NewSearchFilesTool() *SearchFilesTool { return &SearchFilesTool{} }
 
-func (t *SearchFilesTool) ID() string          { return "search_files" }
-func (t *SearchFilesTool) Name() string        { return "Search Files" }
+func (t *SearchFilesTool) ID() string             { return "search_files" }
+func (t *SearchFilesTool) Name() string           { return "Search Files" }
 func (t *SearchFilesTool) RequiresApproval() bool { return false }
 
 func (t *SearchFilesTool) Description() string {
-	return "Search for a pattern in files. Supports regex, case sensitivity, and file pattern filters."
+	return "Search for a pattern in files. Supports regex, case sensitivity, and file pattern filters. Uses ripgrep (rg) when available for fast search."
 }
 
 func (t *SearchFilesTool) Parameters() agent.ToolParameters {
@@ -30,7 +31,7 @@ func (t *SearchFilesTool) Parameters() agent.ToolParameters {
 		Properties: map[string]agent.ToolParamProp{
 			"query":           {Type: "string", Description: "Search query pattern"},
 			"path":            {Type: "string", Description: "Root directory to search in (optional, defaults to .)"},
-			"include_pattern": {Type: "string", Description: "File name glob pattern to include (optional)"},
+			"include_pattern": {Type: "string", Description: "File name glob pattern to include (optional, e.g. '*.go')"},
 			"case_sensitive":  {Type: "boolean", Description: "Case sensitive search (optional, default false)"},
 			"use_regex":       {Type: "boolean", Description: "Treat query as regex (optional, default false)"},
 		},
@@ -64,10 +65,77 @@ func (t *SearchFilesTool) Execute(ctx context.Context, args map[string]any) (str
 		useRegex = v
 	}
 
+	// Try ripgrep first, fallback to Go implementation
+	if result, err := searchWithRipgrep(ctx, query, rootPath, includePattern, caseSensitive, useRegex); err == nil {
+		return result, nil
+	}
+
+	return searchWithGo(ctx, query, rootPath, includePattern, caseSensitive, useRegex)
+}
+
+// searchWithRipgrep uses the rg command for fast search.
+func searchWithRipgrep(ctx context.Context, query, rootPath, includePattern string, caseSensitive, useRegex bool) (string, error) {
+	rgPath, err := exec.LookPath("rg")
+	if err != nil {
+		return "", fmt.Errorf("rg not found")
+	}
+
+	args := []string{
+		"--line-number",
+		"--max-count=200",
+		"--max-filesize=1M",
+	}
+
+	if !caseSensitive {
+		args = append(args, "-i")
+	}
+
+	if !useRegex {
+		args = append(args, "--fixed-strings")
+	}
+
+	if includePattern != "" {
+		args = append(args, "--glob", includePattern)
+	}
+
+	// Skip common non-code directories
+	args = append(args, "--glob", "!{.git,node_modules,vendor,__pycache__,.svn,.hg,dist,build,target,.next,.cache}")
+
+	args = append(args, query, rootPath)
+
+	cmd := exec.CommandContext(ctx, rgPath, args...)
+
+	output, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			// rg returns exit code 1 when no matches found
+			if len(exitErr.Stderr) == 0 || strings.Contains(string(exitErr.Stderr), "no matches") {
+				return "No results found", nil
+			}
+		}
+		return "", err
+	}
+
+	result := strings.TrimRight(string(output), "\n\r")
+	if result == "" {
+		return "No results found", nil
+	}
+
+	lines := strings.Split(result, "\n")
+	if len(lines) > 200 {
+		result = strings.Join(lines[:200], "\n") + fmt.Sprintf("\n... and %d more results (use a more specific query to narrow down)", len(lines)-200)
+	}
+
+	return result, nil
+}
+
+// searchWithGo is a pure Go fallback when rg is not available.
+func searchWithGo(ctx context.Context, query, rootPath, includePattern string, caseSensitive, useRegex bool) (string, error) {
+	_ = ctx
 	type searchHit struct {
-		FilePath string `json:"filePath"`
-		Line     int    `json:"line"`
-		Content  string `json:"content"`
+		FilePath string
+		Line     int
+		Content  string
 	}
 
 	var hits []searchHit
@@ -97,6 +165,9 @@ func (t *SearchFilesTool) Execute(ctx context.Context, args map[string]any) (str
 					Line:     i + 1,
 					Content:  strings.TrimSpace(line),
 				})
+				if len(hits) >= 200 {
+					return filepath.SkipAll
+				}
 			}
 		}
 		return nil

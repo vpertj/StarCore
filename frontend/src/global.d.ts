@@ -3,6 +3,7 @@ interface Backend {
   ComputeDiff(arg1: string, arg2: string): Promise<any[]>;
   AIChat(arg1: any): Promise<any>;
   AIChatStream(arg1: any): Promise<void>;
+  RespondToAsk(arg1: any): Promise<boolean>;
   AICompletion(arg1: any, arg2: any): Promise<any>;
   CloseWindow(): Promise<void>;
   CreateDir(arg1: string): Promise<void>;

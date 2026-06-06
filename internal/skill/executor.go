@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"StarCore/internal/agent"
+	"StarCore/internal/memory"
 	"StarCore/internal/provider"
 )
 
@@ -16,13 +17,54 @@ type Executor struct {
 	registry    *Registry
 	providerMgr *provider.Manager
 	toolExec    *agent.ToolExecutor
+	memoryStore *memory.Store
 }
 
-func NewExecutor(registry *Registry, providerMgr *provider.Manager, toolExec *agent.ToolExecutor) *Executor {
+func NewExecutor(registry *Registry, providerMgr *provider.Manager, toolExec *agent.ToolExecutor, memoryStore *memory.Store) *Executor {
 	return &Executor{
 		registry:    registry,
 		providerMgr: providerMgr,
 		toolExec:    toolExec,
+		memoryStore: memoryStore,
+	}
+}
+
+func estimateTokens(text string) int {
+	cjk := 0
+	other := 0
+	for _, r := range text {
+		if r >= 0x4E00 && r <= 0x9FFF || r >= 0x3400 && r <= 0x4DBF ||
+			r >= 0x3000 && r <= 0x303F || r >= 0xFF00 && r <= 0xFFEF ||
+			r >= 0x3040 && r <= 0x309F || r >= 0x30A0 && r <= 0x30FF ||
+			r >= 0xAC00 && r <= 0xD7AF {
+			cjk++
+		} else {
+			other++
+		}
+	}
+	return int(float64(cjk)*1.5 + float64(other)*0.25)
+}
+
+func recordSkillToken(e *Executor, req provider.ChatRequest, assistantContent string) {
+	if e.memoryStore == nil {
+		return
+	}
+	tokensIn := 0
+	for _, msg := range req.Messages {
+		tokensIn += estimateTokens(msg.Content)
+	}
+	tokensOut := estimateTokens(assistantContent)
+	if tokensIn > 0 || tokensOut > 0 {
+		go e.memoryStore.SaveTokenUsage(&memory.TokenUsageEntry{
+			ID:             fmt.Sprintf("sk_%d", time.Now().UnixNano()),
+			ConversationID: "",
+			ProviderID:     req.ProviderID,
+			Model:          req.Model,
+			TokensIn:       tokensIn,
+			TokensOut:      tokensOut,
+			Cost:           0,
+			CreatedAt:      time.Now().Format(time.RFC3339),
+		})
 	}
 }
 
@@ -46,12 +88,29 @@ func (e *Executor) ExecuteSingle(ctx context.Context, skillID string, sctx Skill
 			{Role: "user", Content: filledPrompt},
 		},
 		Temperature: 0.3,
-		MaxTokens:  0,
-		Stream:     true,
+		MaxTokens:   0,
+		Stream:      true,
 		Tools:       e.buildReadOnlyToolDefs(),
 	}
 
-	return e.providerMgr.ChatStream(ctx, req)
+	eventCh, err := e.providerMgr.ChatStream(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	// Wrap to capture content for token recording
+	ch := make(chan provider.StreamEvent, 64)
+	go func() {
+		defer close(ch)
+		var content string
+		for event := range eventCh {
+			if event.Type == "data" {
+				content += event.Content
+			}
+			ch <- event
+		}
+		recordSkillToken(e, req, content)
+	}()
+	return ch, nil
 }
 
 // Execute runs a skill with tool calling support (mini agent loop).
@@ -75,8 +134,8 @@ func (e *Executor) Execute(ctx context.Context, skillID string, sctx SkillContex
 			{Role: "user", Content: filledPrompt},
 		},
 		Temperature: 0.3,
-		MaxTokens:  0,
-		Stream:     true,
+		MaxTokens:   0,
+		Stream:      true,
 		Tools:       e.buildToolDefs(),
 	}
 
@@ -144,7 +203,7 @@ func (e *Executor) runSkillLoop(ctx context.Context, req provider.ChatRequest, c
 	currentReq := req
 	for loop := 0; loop < maxSkillLoops; loop++ {
 
-			select {
+		select {
 		case <-ctx.Done():
 			ch <- provider.StreamEvent{Type: "done"}
 			return
@@ -195,6 +254,8 @@ func (e *Executor) runSkillLoop(ctx context.Context, req provider.ChatRequest, c
 				}
 			}
 		}
+
+		recordSkillToken(e, currentReq, assistantContent)
 
 		if !hasToolCalls {
 			ch <- provider.StreamEvent{Type: "done"}

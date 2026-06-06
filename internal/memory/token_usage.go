@@ -16,10 +16,10 @@ type TokenUsageEntry struct {
 }
 
 type TokenUsageStats struct {
-	TotalTokensIn  int                       `json:"totalTokensIn"`
-	TotalTokensOut int                       `json:"totalTokensOut"`
-	TotalCost      float64                   `json:"totalCost"`
-	ByProvider     map[string]ProviderUsage  `json:"byProvider"`
+	TotalTokensIn  int                      `json:"totalTokensIn"`
+	TotalTokensOut int                      `json:"totalTokensOut"`
+	TotalCost      float64                  `json:"totalCost"`
+	ByProvider     map[string]ProviderUsage `json:"byProvider"`
 }
 
 type ProviderUsage struct {

@@ -23,10 +23,10 @@ func NewOpenAIProvider() *OpenAIProvider {
 		id:   "openai",
 		name: "OpenAI",
 		config: ProviderConfig{
-			ID:        "openai",
-			Name:      "OpenAI",
-			Endpoint:  "https://api.openai.com/v1/chat/completions",
-			Enabled:   true,
+			ID:       "openai",
+			Name:     "OpenAI",
+			Endpoint: "https://api.openai.com/v1/chat/completions",
+			Enabled:  true,
 		},
 	}
 }
@@ -42,17 +42,17 @@ func NewGenericOpenAIProvider(id, name string) *OpenAIProvider {
 	}
 }
 
-func (p *OpenAIProvider) ID() string                       { return p.id }
-func (p *OpenAIProvider) Name() string                     { return p.name }
-func (p *OpenAIProvider) SetConfig(cfg ProviderConfig)     { p.config = cfg }
-func (p *OpenAIProvider) GetConfig() ProviderConfig        { return p.config }
+func (p *OpenAIProvider) ID() string                   { return p.id }
+func (p *OpenAIProvider) Name() string                 { return p.name }
+func (p *OpenAIProvider) SetConfig(cfg ProviderConfig) { p.config = cfg }
+func (p *OpenAIProvider) GetConfig() ProviderConfig    { return p.config }
 
 type openAIRequestBody struct {
-	Model       string          `json:"model"`
-	Messages    []Message       `json:"messages"`
-	Temperature float64         `json:"temperature,omitempty"`
-	MaxTokens   int             `json:"max_tokens,omitempty"`
-	Stream      bool            `json:"stream"`
+	Model       string           `json:"model"`
+	Messages    []Message        `json:"messages"`
+	Temperature float64          `json:"temperature,omitempty"`
+	MaxTokens   int              `json:"max_tokens,omitempty"`
+	Stream      bool             `json:"stream"`
 	Tools       []ToolDefinition `json:"tools,omitempty"`
 }
 
@@ -118,6 +118,31 @@ func captureDeltaExtra(raw json.RawMessage) map[string]json.RawMessage {
 	return extra
 }
 
+// resolveChatEndpoint ensures the endpoint includes the chat completions path.
+// Users may configure just the base URL (e.g. "https://api.deepseek.com")
+// without the /v1/chat/completions suffix.
+func resolveChatEndpoint(endpoint string) string {
+	if endpoint == "" {
+		return "https://api.openai.com/v1/chat/completions"
+	}
+	// Already includes the path — use as-is
+	if strings.Contains(endpoint, "/chat/completions") || strings.Contains(endpoint, "/messages") {
+		return endpoint
+	}
+	// Trim trailing slashes
+	endpoint = strings.TrimRight(endpoint, "/")
+	// Anthropic-style endpoint
+	if strings.Contains(endpoint, "anthropic.com") {
+		return endpoint + "/v1/messages"
+	}
+	// OpenAI-compatible: append /v1/chat/completions
+	// If endpoint already has /v1 or /api/v3 etc, just append /chat/completions
+	if strings.HasSuffix(endpoint, "/v1") || strings.Contains(endpoint, "/api/v") {
+		return endpoint + "/chat/completions"
+	}
+	return endpoint + "/v1/chat/completions"
+}
+
 func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	if p.config.APIKey == "" {
 		return nil, fmt.Errorf("OpenAI API key is required")
@@ -149,10 +174,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	endpoint := p.config.Endpoint
-	if endpoint == "" {
-		endpoint = "https://api.openai.com/v1/chat/completions"
-	}
+	endpoint := resolveChatEndpoint(p.config.Endpoint)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(bodyBytes))
 	if err != nil {
@@ -162,7 +184,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+p.config.APIKey)
 
-	client := &http.Client{Timeout: 120 * time.Second}
+	client := NewHTTPClient(120 * time.Second)
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
@@ -231,10 +253,7 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest) (<-cha
 		return ch, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	endpoint := p.config.Endpoint
-	if endpoint == "" {
-		endpoint = "https://api.openai.com/v1/chat/completions"
-	}
+	endpoint := resolveChatEndpoint(p.config.Endpoint)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(bodyBytes))
 	if err != nil {
@@ -245,7 +264,7 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest) (<-cha
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+p.config.APIKey)
 
-	client := &http.Client{Timeout: 300 * time.Second}
+	client := NewHTTPClient(300 * time.Second)
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		close(ch)
@@ -375,6 +394,11 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest) (<-cha
 			}
 		}
 
+		if err := scanner.Err(); err != nil {
+			ch <- StreamEvent{Type: "error", Content: err.Error()}
+			return
+		}
+
 		// Flush remaining tool calls
 		if len(pendingToolCalls) > 0 {
 			tcs := make([]ToolCall, 0, len(pendingToolCalls))
@@ -397,8 +421,12 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest) (<-cha
 func (p *OpenAIProvider) Completion(ctx context.Context, req CompletionRequest) (*CompletionResponse, error) {
 	content := req.Content
 	cursor := req.CursorPos
-	if cursor < 0 { cursor = 0 }
-	if cursor > len(content) { cursor = len(content) }
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor > len(content) {
+		cursor = len(content)
+	}
 	before := content[:cursor]
 	after := content[cursor:]
 
@@ -426,8 +454,12 @@ func (p *OpenAIProvider) Completion(ctx context.Context, req CompletionRequest) 
 	}
 
 	maxTokens := EstimateContextWindow(req.Model)
-	if maxTokens > 4096 { maxTokens = 512 }
-	if maxTokens < 64 { maxTokens = 256 }
+	if maxTokens > 4096 {
+		maxTokens = 512
+	}
+	if maxTokens < 64 {
+		maxTokens = 256
+	}
 
 	chatReq := ChatRequest{
 		Model:       req.Model,
@@ -450,9 +482,17 @@ func (p *OpenAIProvider) ListModels(ctx context.Context) ([]Model, error) {
 		return defaultModels(p), nil
 	}
 
-	endpoint := strings.TrimSuffix(p.config.Endpoint, "/chat/completions")
-	endpoint = strings.TrimSuffix(endpoint, "/v1")
-	endpoint = endpoint + "/v1/models"
+	endpoint := p.config.Endpoint
+	// Volcengine uses a non-standard path; models are at /api/v3/models
+	if strings.Contains(endpoint, "volces.com") {
+		u, _ := strings.CutPrefix(endpoint, "https://")
+		u, _, _ = strings.Cut(u, "/")
+		endpoint = "https://" + u + "/api/v3/models"
+	} else {
+		endpoint = strings.TrimSuffix(endpoint, "/chat/completions")
+		endpoint = strings.TrimSuffix(endpoint, "/v1")
+		endpoint = endpoint + "/v1/models"
+	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
 	if err != nil {
@@ -461,7 +501,7 @@ func (p *OpenAIProvider) ListModels(ctx context.Context) ([]Model, error) {
 
 	httpReq.Header.Set("Authorization", "Bearer "+p.config.APIKey)
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := NewHTTPClient(10 * time.Second)
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return defaultModels(p), nil
@@ -483,6 +523,7 @@ func (p *OpenAIProvider) ListModels(ctx context.Context) ([]Model, error) {
 
 	models := make([]Model, 0, len(result.Data))
 	for _, m := range result.Data {
+		cw := EstimateContextWindow(m.ID)
 		models = append(models, Model{
 			ID:               m.ID,
 			Name:             m.ID,
@@ -490,7 +531,8 @@ func (p *OpenAIProvider) ListModels(ctx context.Context) ([]Model, error) {
 			SupportsTool:     true,
 			SupportsVision:   false,
 			SupportsThinking: true,
-			MaxTokens:        EstimateContextWindow(m.ID),
+			MaxTokens:        cw,
+			ContextWindow:    cw,
 		})
 	}
 	if len(models) == 0 {
@@ -501,10 +543,10 @@ func (p *OpenAIProvider) ListModels(ctx context.Context) ([]Model, error) {
 
 func defaultModels(p *OpenAIProvider) []Model {
 	return []Model{
-		{ID: "gpt-4o", Name: "GPT-4o", ProviderID: p.ID(), MaxTokens: 128000, SupportsTool: true, SupportsVision: true},
-		{ID: "gpt-4o-mini", Name: "GPT-4o Mini", ProviderID: p.ID(), MaxTokens: 128000, SupportsTool: true},
-		{ID: "gpt-4-turbo", Name: "GPT-4 Turbo", ProviderID: p.ID(), MaxTokens: 128000, SupportsTool: true},
-		{ID: "gpt-3.5-turbo", Name: "GPT-3.5 Turbo", ProviderID: p.ID(), MaxTokens: 16385, SupportsTool: true},
+		{ID: "gpt-4o", Name: "GPT-4o", ProviderID: p.ID(), MaxTokens: 200000, ContextWindow: 200000, SupportsTool: true, SupportsVision: true},
+		{ID: "gpt-4o-mini", Name: "GPT-4o Mini", ProviderID: p.ID(), MaxTokens: 128000, ContextWindow: 128000, SupportsTool: true},
+		{ID: "gpt-4-turbo", Name: "GPT-4 Turbo", ProviderID: p.ID(), MaxTokens: 128000, ContextWindow: 128000, SupportsTool: true},
+		{ID: "gpt-3.5-turbo", Name: "GPT-3.5 Turbo", ProviderID: p.ID(), MaxTokens: 16385, ContextWindow: 16385, SupportsTool: true},
 	}
 }
 
@@ -531,6 +573,8 @@ func EstimateContextWindow(model string) int {
 		strings.Contains(model, "claude-3-sonnet") || strings.Contains(model, "claude-3-haiku") ||
 		strings.Contains(model, "claude-haiku-4"):
 		return 200000
+	case strings.Contains(model, "deepseek-v4") || strings.Contains(model, "deepseek-r1"):
+		return 1048576
 	case strings.Contains(model, "deepseek"):
 		return 65536
 	case strings.Contains(model, "gemini-2") || strings.Contains(model, "gemma"):

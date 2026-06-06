@@ -83,7 +83,8 @@ func (t *SkillTool) Execute(ctx context.Context, args map[string]any) (string, e
 				if round >= maxChainedRounds {
 					result.WriteString("\n[Skill reached max chained rounds]")
 					// drain remaining events
-					for range eventCh {}
+					for range eventCh {
+					}
 				}
 			case "error":
 				return "", fmt.Errorf("skill error: %s", event.Content)

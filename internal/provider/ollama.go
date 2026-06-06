@@ -27,20 +27,25 @@ func NewOllamaProvider() *OllamaProvider {
 	}
 }
 
-func (p *OllamaProvider) ID() string   { return "ollama" }
-func (p *OllamaProvider) Name() string { return "Ollama" }
+func (p *OllamaProvider) ID() string                      { return "ollama" }
+func (p *OllamaProvider) Name() string                    { return "Ollama" }
 func (p *OllamaProvider) SetConfig(config ProviderConfig) { p.config = config }
 func (p *OllamaProvider) GetConfig() ProviderConfig       { return p.config }
 
 type ollamaChatRequest struct {
-	Model     string    `json:"model"`
-	Messages  []Message `json:"messages"`
-	Stream    bool      `json:"stream"`
+	Model    string           `json:"model"`
+	Messages []Message        `json:"messages"`
+	Stream   bool             `json:"stream"`
+	Tools    []ToolDefinition `json:"tools,omitempty"`
 }
 
 type ollamaChatResponse struct {
-	Message Message `json:"message"`
-	Done    bool    `json:"done"`
+	Message struct {
+		Role      string     `json:"role"`
+		Content   string     `json:"content"`
+		ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	} `json:"message"`
+	Done bool `json:"done"`
 }
 
 type ollamaModel struct {
@@ -63,6 +68,7 @@ func (p *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 		Model:    req.Model,
 		Messages: req.Messages,
 		Stream:   false,
+		Tools:    req.Tools,
 	}
 
 	jsonBody, err := json.Marshal(body)
@@ -77,7 +83,7 @@ func (p *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 300 * time.Second}
+	client := NewHTTPClient(300 * time.Second)
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
@@ -114,6 +120,7 @@ func (p *OllamaProvider) ChatStream(ctx context.Context, req ChatRequest) (<-cha
 		Model:    req.Model,
 		Messages: req.Messages,
 		Stream:   true,
+		Tools:    req.Tools,
 	}
 
 	jsonBody, err := json.Marshal(body)
@@ -130,7 +137,7 @@ func (p *OllamaProvider) ChatStream(ctx context.Context, req ChatRequest) (<-cha
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 0}
+	client := NewHTTPClient(0)
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		close(ch)
@@ -160,6 +167,9 @@ func (p *OllamaProvider) ChatStream(ctx context.Context, req ChatRequest) (<-cha
 			}
 			if chunk.Message.Content != "" {
 				ch <- StreamEvent{Type: "data", Content: chunk.Message.Content}
+			}
+			if len(chunk.Message.ToolCalls) > 0 {
+				ch <- StreamEvent{Type: "tool_call", ToolCalls: chunk.Message.ToolCalls}
 			}
 			if chunk.Done {
 				ch <- StreamEvent{Type: "done"}
@@ -191,7 +201,7 @@ func (p *OllamaProvider) ListModels(ctx context.Context) ([]Model, error) {
 		return nil, err
 	}
 
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := NewHTTPClient(5 * time.Second)
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return []Model{}, nil
@@ -211,10 +221,11 @@ func (p *OllamaProvider) ListModels(ctx context.Context) ([]Model, error) {
 	models := make([]Model, 0, len(modelsResp.Models))
 	for _, m := range modelsResp.Models {
 		models = append(models, Model{
-			ID:         m.Name,
-			Name:       m.Name,
-			ProviderID: "ollama",
-			MaxTokens:  32000,
+			ID:            m.Name,
+			Name:          m.Name,
+			ProviderID:    "ollama",
+			MaxTokens:     32000,
+			ContextWindow: 32000,
 		})
 	}
 	return models, nil
@@ -226,7 +237,7 @@ func (p *OllamaProvider) Validate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := NewHTTPClient(5 * time.Second)
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return fmt.Errorf("ollama not running: %w", err)

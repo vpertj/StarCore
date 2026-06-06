@@ -14,8 +14,8 @@ type GetDiagnosticsTool struct{}
 
 func NewGetDiagnosticsTool() *GetDiagnosticsTool { return &GetDiagnosticsTool{} }
 
-func (t *GetDiagnosticsTool) ID() string          { return "get_diagnostics" }
-func (t *GetDiagnosticsTool) Name() string        { return "Get Diagnostics" }
+func (t *GetDiagnosticsTool) ID() string             { return "get_diagnostics" }
+func (t *GetDiagnosticsTool) Name() string           { return "Get Diagnostics" }
 func (t *GetDiagnosticsTool) RequiresApproval() bool { return false }
 
 func (t *GetDiagnosticsTool) Description() string {
@@ -33,6 +33,7 @@ func (t *GetDiagnosticsTool) Parameters() agent.ToolParameters {
 }
 
 func (t *GetDiagnosticsTool) Execute(ctx context.Context, args map[string]any) (string, error) {
+	_ = ctx
 	projectPath, _ := args["project_path"].(string)
 	if projectPath == "" {
 		return "[]", nil

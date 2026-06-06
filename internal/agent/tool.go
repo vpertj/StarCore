@@ -20,10 +20,20 @@ type ToolCall struct {
 }
 
 type ToolResult struct {
-	CallID string `json:"callId"`
-	Name   string `json:"name"`
-	Result string `json:"result"`
-	Error  string `json:"error,omitempty"`
+	CallID   string    `json:"callId"`
+	Name     string    `json:"name"`
+	Result   string    `json:"result"`
+	Error    string    `json:"error,omitempty"`
+	FileMeta *FileMeta `json:"fileMeta,omitempty"`
+}
+
+// FileMeta carries file operation metadata for frontend visualization.
+type FileMeta struct {
+	Operation string `json:"operation"` // "read", "write", "edit", "search", "glob"
+	FilePath  string `json:"filePath"`
+	StartLine int    `json:"startLine,omitempty"`
+	EndLine   int    `json:"endLine,omitempty"`
+	Summary   string `json:"summary,omitempty"` // e.g. "+5 lines", "L39-43", "3 matches"
 }
 
 type ToolDef struct {

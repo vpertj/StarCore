@@ -13,10 +13,10 @@ type AgentDef struct {
 }
 
 type AgentConfig struct {
-	Temperature      float64 `json:"temperature"`
-	MaxTokens        int     `json:"maxTokens"`
-	AutoApproveTools bool    `json:"autoApproveTools"`
-	CustomPromptAppend string `json:"customPromptAppend"`
+	Temperature        float64 `json:"temperature"`
+	MaxTokens          int     `json:"maxTokens"`
+	AutoApproveTools   bool    `json:"autoApproveTools"`
+	CustomPromptAppend string  `json:"customPromptAppend"`
 }
 
 func DefaultConfig() AgentConfig {

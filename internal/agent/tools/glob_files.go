@@ -44,6 +44,7 @@ var alwaysIgnore = map[string]bool{
 }
 
 func (t *GlobTool) Execute(ctx context.Context, args map[string]any) (string, error) {
+	_ = ctx
 	pattern, _ := args["pattern"].(string)
 	if pattern == "" {
 		return "", fmt.Errorf("pattern is required")
@@ -78,7 +79,7 @@ func (t *GlobTool) Execute(ctx context.Context, args map[string]any) (string, er
 
 	const maxResults = 200
 	if len(matches) > maxResults {
-			total := len(matches)
+		total := len(matches)
 		matches = matches[:maxResults]
 		matches = append(matches, fmt.Sprintf("... and %d more matches", total-maxResults))
 	}

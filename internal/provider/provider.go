@@ -6,11 +6,11 @@ import (
 )
 
 type Message struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	Name       string     `json:"name,omitempty"`
+	Role       string                     `json:"role"`
+	Content    string                     `json:"content"`
+	ToolCalls  []ToolCall                 `json:"tool_calls,omitempty"`
+	ToolCallID string                     `json:"tool_call_id,omitempty"`
+	Name       string                     `json:"name,omitempty"`
 	Extra      map[string]json.RawMessage `json:"-"`
 }
 
@@ -96,13 +96,13 @@ type CompletionResponse struct {
 }
 
 type StreamEvent struct {
-	Type       string                    `json:"type"`
-	Content    string                    `json:"content"`
-	Name       string                    `json:"name,omitempty"`
-	Args       string                    `json:"args,omitempty"`
-	Result     string                    `json:"result,omitempty"`
-	ToolCalls  []ToolCall                `json:"tool_calls,omitempty"`
-	ToolCallID string                    `json:"tool_call_id,omitempty"`
+	Type       string                     `json:"type"`
+	Content    string                     `json:"content"`
+	Name       string                     `json:"name,omitempty"`
+	Args       string                     `json:"args,omitempty"`
+	Result     string                     `json:"result,omitempty"`
+	ToolCalls  []ToolCall                 `json:"tool_calls,omitempty"`
+	ToolCallID string                     `json:"tool_call_id,omitempty"`
 	Extra      map[string]json.RawMessage `json:"-"`
 }
 
@@ -111,28 +111,29 @@ type Model struct {
 	Name             string `json:"name"`
 	ProviderID       string `json:"providerId"`
 	MaxTokens        int    `json:"maxTokens"`
+	ContextWindow    int    `json:"contextWindow"`
 	SupportsVision   bool   `json:"supportsVision"`
 	SupportsTool     bool   `json:"supportsTool"`
 	SupportsThinking bool   `json:"supportsThinking"`
 }
 
 type ProviderConfig struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	APIKey       string `json:"apiKey"`
-	Endpoint     string `json:"endpoint"`
-	IsDefault    bool   `json:"isDefault"`
-	Enabled      bool   `json:"enabled"`
-	TimeoutSecs  int    `json:"timeoutSecs,omitempty"`  // 0 = use default
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	APIKey      string `json:"apiKey"`
+	Endpoint    string `json:"endpoint"`
+	IsDefault   bool   `json:"isDefault"`
+	Enabled     bool   `json:"enabled"`
+	TimeoutSecs int    `json:"timeoutSecs,omitempty"` // 0 = use default
 }
 
 type ProviderInfo struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Endpoint  string    `json:"endpoint"`
-	Enabled   bool      `json:"enabled"`
-	IsDefault bool      `json:"isDefault"`
-	Models    []Model   `json:"models"`
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	Endpoint  string  `json:"endpoint"`
+	Enabled   bool    `json:"enabled"`
+	IsDefault bool    `json:"isDefault"`
+	Models    []Model `json:"models"`
 }
 
 type Provider interface {

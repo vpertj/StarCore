@@ -14,8 +14,8 @@ type ListDirectoryTool struct{}
 
 func NewListDirectoryTool() *ListDirectoryTool { return &ListDirectoryTool{} }
 
-func (t *ListDirectoryTool) ID() string          { return "list_directory" }
-func (t *ListDirectoryTool) Name() string        { return "List Directory" }
+func (t *ListDirectoryTool) ID() string             { return "list_directory" }
+func (t *ListDirectoryTool) Name() string           { return "List Directory" }
 func (t *ListDirectoryTool) RequiresApproval() bool { return false }
 
 func (t *ListDirectoryTool) Description() string {
@@ -33,6 +33,7 @@ func (t *ListDirectoryTool) Parameters() agent.ToolParameters {
 }
 
 func (t *ListDirectoryTool) Execute(ctx context.Context, args map[string]any) (string, error) {
+	_ = ctx
 	path, ok := args["path"].(string)
 	if !ok || path == "" {
 		path = "."

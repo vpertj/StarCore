@@ -28,6 +28,26 @@ export namespace agent {
 	        this.category = source["category"];
 	    }
 	}
+	export class FileMeta {
+	    operation: string;
+	    filePath: string;
+	    startLine?: number;
+	    endLine?: number;
+	    summary?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileMeta(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.operation = source["operation"];
+	        this.filePath = source["filePath"];
+	        this.startLine = source["startLine"];
+	        this.endLine = source["endLine"];
+	        this.summary = source["summary"];
+	    }
+	}
 	export class ToolCall {
 	    id: string;
 	    name: string;
@@ -137,6 +157,7 @@ export namespace agent {
 	    name: string;
 	    result: string;
 	    error?: string;
+	    fileMeta?: FileMeta;
 	
 	    static createFrom(source: any = {}) {
 	        return new ToolResult(source);
@@ -148,7 +169,26 @@ export namespace agent {
 	        this.name = source["name"];
 	        this.result = source["result"];
 	        this.error = source["error"];
+	        this.fileMeta = this.convertValues(source["fileMeta"], FileMeta);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }
@@ -283,6 +323,40 @@ export namespace git {
 
 export namespace lsp {
 	
+	export class FrontendCodeAction {
+	    title: string;
+	    kind?: string;
+	    edit?: Record<string, Array<FrontendTextEdit>>;
+	
+	    static createFrom(source: any = {}) {
+	        return new FrontendCodeAction(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.kind = source["kind"];
+	        this.edit = this.convertValues(source["edit"], Array<FrontendTextEdit>, true);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class FrontendCompletion {
 	    label: string;
 	    insertText: string;
@@ -299,6 +373,68 @@ export namespace lsp {
 	        this.insertText = source["insertText"];
 	        this.kind = source["kind"];
 	        this.detail = source["detail"];
+	    }
+	}
+	export class FrontendLocation {
+	    filePath: string;
+	    line: number;
+	    col: number;
+	    endLine: number;
+	    endCol: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new FrontendLocation(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.filePath = source["filePath"];
+	        this.line = source["line"];
+	        this.col = source["col"];
+	        this.endLine = source["endLine"];
+	        this.endCol = source["endCol"];
+	    }
+	}
+	export class FrontendServerInfo {
+	    languageId: string;
+	    command: string;
+	    args: string[];
+	    extensions: string[];
+	    custom: boolean;
+	    running: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new FrontendServerInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.languageId = source["languageId"];
+	        this.command = source["command"];
+	        this.args = source["args"];
+	        this.extensions = source["extensions"];
+	        this.custom = source["custom"];
+	        this.running = source["running"];
+	    }
+	}
+	export class FrontendTextEdit {
+	    newText: string;
+	    startLine: number;
+	    startCol: number;
+	    endLine: number;
+	    endCol: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new FrontendTextEdit(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.newText = source["newText"];
+	        this.startLine = source["startLine"];
+	        this.startCol = source["startCol"];
+	        this.endLine = source["endLine"];
+	        this.endCol = source["endCol"];
 	    }
 	}
 	export class Position {
@@ -392,6 +528,40 @@ export namespace lsp {
 		    }
 		    return a;
 		}
+	}
+	export class LanguagePackage {
+	    id: string;
+	    name: string;
+	    languageId: string;
+	    command: string;
+	    args: string[];
+	    extensions: string[];
+	    installCmd: string;
+	    downloadUrl: string;
+	    downloadFile: string;
+	    description: string;
+	    category: string;
+	    hasHighlight: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new LanguagePackage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.languageId = source["languageId"];
+	        this.command = source["command"];
+	        this.args = source["args"];
+	        this.extensions = source["extensions"];
+	        this.installCmd = source["installCmd"];
+	        this.downloadUrl = source["downloadUrl"];
+	        this.downloadFile = source["downloadFile"];
+	        this.description = source["description"];
+	        this.category = source["category"];
+	        this.hasHighlight = source["hasHighlight"];
+	    }
 	}
 	export class Location {
 	    uri: string;
@@ -915,6 +1085,7 @@ export namespace provider {
 	    name: string;
 	    providerId: string;
 	    maxTokens: number;
+	    contextWindow: number;
 	    supportsVision: boolean;
 	    supportsTool: boolean;
 	    supportsThinking: boolean;
@@ -929,6 +1100,7 @@ export namespace provider {
 	        this.name = source["name"];
 	        this.providerId = source["providerId"];
 	        this.maxTokens = source["maxTokens"];
+	        this.contextWindow = source["contextWindow"];
 	        this.supportsVision = source["supportsVision"];
 	        this.supportsTool = source["supportsTool"];
 	        this.supportsThinking = source["supportsThinking"];
@@ -1058,6 +1230,25 @@ export namespace skill {
 	        this.resultType = source["resultType"];
 	        this.associatedAgents = source["associatedAgents"];
 	        this.category = source["category"];
+	    }
+	}
+
+}
+
+export namespace tools {
+	
+	export class AskUserResponse {
+	    id: string;
+	    answer: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AskUserResponse(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.answer = source["answer"];
 	    }
 	}
 

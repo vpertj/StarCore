@@ -9,6 +9,57 @@ currentProject.subscribe(v => {
     else localStorage.removeItem(KEYS.LAST_PROJECT)
   } catch {}
 })
+
+export async function openProjectFolder() {
+  try {
+    const folder = await window.backend.OpenFolder()
+    if (folder) {
+      currentProject.set(folder)
+      if (window.backend.SetProjectPath) {
+        window.backend.SetProjectPath(folder)
+      }
+      addRecentProject(folder)
+    }
+    return folder
+  } catch (e) {
+    console.error('Failed to open folder:', e)
+    return null
+  }
+}
+
+export function openProjectPath(path) {
+  if (!path) return
+  currentProject.set(path)
+  if (window.backend.SetProjectPath) {
+    window.backend.SetProjectPath(path)
+  }
+  addRecentProject(path)
+}
+
+export const recentProjects = writable(/** @type {string[]} */ ([]))
+
+try {
+  const saved = localStorage.getItem(KEYS.RECENT_PROJECTS)
+  if (saved) recentProjects.set(JSON.parse(saved))
+} catch {}
+
+recentProjects.subscribe(v => {
+  try {
+    localStorage.setItem(KEYS.RECENT_PROJECTS, JSON.stringify(v))
+  } catch {}
+})
+
+function addRecentProject(path) {
+  recentProjects.update(list => {
+    const filtered = list.filter(p => p !== path)
+    filtered.unshift(path)
+    return filtered.slice(0, 10)
+  })
+}
+
+export function removeRecentProject(path) {
+  recentProjects.update(list => list.filter(p => p !== path))
+}
 export const openedFiles = writable(/** @type {Array<{path: string, name: string, pinned?: boolean}>} */ ([]))
 
 // Restore openedFiles from localStorage
@@ -66,6 +117,9 @@ currentProject.subscribe(async ($currentProject) => {
       }, 50)
     })
     await waitForBackend
+  }
+  if (window.backend.SetProjectPath) {
+    window.backend.SetProjectPath($currentProject)
   }
   buildFileTree($currentProject).then(tree => fileTree.set(tree))
 })

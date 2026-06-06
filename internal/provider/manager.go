@@ -173,7 +173,10 @@ func (m *Manager) GetProviders() []ProviderInfo {
 			Enabled:   cfg.Enabled,
 			IsDefault: cfg.IsDefault,
 		}
-		ctx := m.appCtx(); if ctx == nil { ctx = context.Background() }
+		ctx := m.appCtx()
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		models, err := p.ListModels(ctx)
 		if err == nil {
 			info.Models = models

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -17,15 +18,149 @@ type ServerInfo struct {
 	Command    string
 	Args       []string
 	Extensions []string
+	Custom     bool
 	client     *Client
 }
 
+type FrontendServerInfo struct {
+	LanguageID string   `json:"languageId"`
+	Command    string   `json:"command"`
+	Args       []string `json:"args"`
+	Extensions []string `json:"extensions"`
+	Custom     bool     `json:"custom"`
+	Running    bool     `json:"running"`
+}
+
+type LanguagePackage struct {
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	LanguageID   string   `json:"languageId"`
+	Command      string   `json:"command"`
+	Args         []string `json:"args"`
+	Extensions   []string `json:"extensions"`
+	InstallCmd   string   `json:"installCmd"`
+	DownloadURL  string   `json:"downloadUrl"`
+	DownloadFile string   `json:"downloadFile"`
+	Description  string   `json:"description"`
+	Category     string   `json:"category"`
+	HasHighlight bool     `json:"hasHighlight"`
+}
+
+var PresetLanguagePackages = []LanguagePackage{
+	{
+		ID: "rust", Name: "Rust", LanguageID: "rust",
+		Command: "rust-analyzer", Args: []string{},
+		Extensions:   []string{".rs"},
+		DownloadURL:  "https://github.com/rust-lang/rust-analyzer/releases/latest/download/rust-analyzer-x86_64-pc-windows-msvc.gz",
+		DownloadFile: "rust-analyzer.exe",
+		Description:  "Rust 语言服务器 (rust-analyzer)",
+		Category:     "language",
+		HasHighlight: true,
+	},
+	{
+		ID: "vue", Name: "Vue", LanguageID: "vue",
+		Command: "vue-language-server", Args: []string{"--stdio"},
+		Extensions:   []string{".vue"},
+		InstallCmd:   "npm install -g @vue/language-server",
+		Description:  "Vue 3 语言服务器 (Volar)，需 npm",
+		Category:     "framework",
+		HasHighlight: true,
+	},
+	{
+		ID: "java", Name: "Java", LanguageID: "java",
+		Command: "jdtls", Args: []string{},
+		Extensions:   []string{".java"},
+		DownloadURL:  "https://download.eclipse.org/jdtls/milestones/latest/jdt-language-server-latest.tar.gz",
+		DownloadFile: "jdtls",
+		Description:  "Java 语言服务器 (Eclipse JDT.LS)",
+		Category:     "language",
+		HasHighlight: true,
+	},
+	{
+		ID: "csharp", Name: "C#", LanguageID: "csharp",
+		Command: "omnisharp", Args: []string{"--stdio"},
+		Extensions:   []string{".cs"},
+		DownloadURL:  "https://github.com/OmniSharp/omnisharp-roslyn/releases/latest/download/omnisharp-win-x64-net6.0.zip",
+		DownloadFile: "omnisharp.exe",
+		Description:  "C# 语言服务器 (OmniSharp)",
+		Category:     "language",
+		HasHighlight: true,
+	},
+	{
+		ID: "ruby", Name: "Ruby", LanguageID: "ruby",
+		Command: "solargraph", Args: []string{"stdio"},
+		Extensions:   []string{".rb", ".erb"},
+		InstallCmd:   "gem install solargraph",
+		Description:  "Ruby 语言服务器 (Solargraph)，需 gem",
+		Category:     "language",
+		HasHighlight: false,
+	},
+	{
+		ID: "dockerfile", Name: "Dockerfile", LanguageID: "dockerfile",
+		Command: "docker-langserver", Args: []string{"--stdio"},
+		Extensions:   []string{".dockerfile"},
+		InstallCmd:   "npm install -g dockerfile-language-server-nodejs",
+		Description:  "Dockerfile 语言服务器，需 npm",
+		Category:     "tool",
+		HasHighlight: false,
+	},
+	{
+		ID: "bash", Name: "Bash", LanguageID: "bash",
+		Command: "bash-language-server", Args: []string{"start"},
+		Extensions:   []string{".sh", ".bash"},
+		InstallCmd:   "npm install -g bash-language-server",
+		Description:  "Bash 语言服务器，需 npm",
+		Category:     "language",
+		HasHighlight: false,
+	},
+	{
+		ID: "lua", Name: "Lua", LanguageID: "lua",
+		Command: "lua-language-server", Args: []string{},
+		Extensions:   []string{".lua"},
+		DownloadURL:  "https://github.com/LuaLS/lua-language-server/releases/latest/download/lua-language-server-3.13.5-win32-x64.zip",
+		DownloadFile: "lua-language-server.exe",
+		Description:  "Lua 语言服务器",
+		Category:     "language",
+		HasHighlight: false,
+	},
+	{
+		ID: "terraform", Name: "Terraform", LanguageID: "terraform",
+		Command: "terraform-ls", Args: []string{},
+		Extensions:   []string{".tf", ".tfvars"},
+		DownloadURL:  "https://github.com/hashicorp/terraform-ls/releases/latest/download/terraform-ls_0.34.1_windows_amd64.zip",
+		DownloadFile: "terraform-ls.exe",
+		Description:  "Terraform 语言服务器",
+		Category:     "tool",
+		HasHighlight: false,
+	},
+}
+
+func GetPresetLanguagePackages() []LanguagePackage {
+	return PresetLanguagePackages
+}
+
+func FindLocalBin(command string) string {
+	d, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	binDir := filepath.Join(d, "StarCore", "bin")
+
+	for _, name := range []string{command, command + ".exe"} {
+		p := filepath.Join(binDir, name)
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			return p
+		}
+	}
+	return ""
+}
+
 type Manager struct {
-	ctx       context.Context
-	servers   map[string]*ServerInfo // keyed by languageID
-	mu        sync.Mutex
-	docs      map[string]*docState // keyed by filepath
-	docsMu    sync.Mutex
+	ctx     context.Context
+	servers map[string]*ServerInfo // keyed by languageID
+	mu      sync.Mutex
+	docs    map[string]*docState // keyed by filepath
+	docsMu  sync.Mutex
 }
 
 type docState struct {
@@ -57,34 +192,66 @@ func (m *Manager) RegisterServer(langID, command string, args []string, extensio
 	}
 }
 
+func (m *Manager) RegisterCustomServer(langID, command string, args []string, extensions []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.servers[langID] = &ServerInfo{
+		LanguageID: langID,
+		Command:    command,
+		Args:       args,
+		Extensions: extensions,
+		Custom:     true,
+	}
+}
+
+func (m *Manager) UnregisterServer(langID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	info, ok := m.servers[langID]
+	if ok && info.Custom {
+		if info.client != nil {
+			info.client.Notify("shutdown", nil)
+			info.client.Close()
+		}
+		delete(m.servers, langID)
+	}
+}
+
+func (m *Manager) ListServers() []FrontendServerInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]FrontendServerInfo, 0, len(m.servers))
+	for _, info := range m.servers {
+		result = append(result, FrontendServerInfo{
+			LanguageID: info.LanguageID,
+			Command:    info.Command,
+			Args:       info.Args,
+			Extensions: info.Extensions,
+			Custom:     info.Custom,
+			Running:    info.client != nil,
+		})
+	}
+	return result
+}
+
 func (m *Manager) detectLanguage(filePath string) string {
 	ext := strings.ToLower(filepath.Ext(filePath))
-	switch ext {
-	case ".go":
-		return "go"
-	case ".js", ".jsx", ".mjs", ".cjs":
-		return "javascript"
-	case ".ts", ".tsx":
-		return "typescript"
-	case ".py", ".pyw":
-		return "python"
-	case ".rs":
-		return "rust"
-	case ".json":
-		return "json"
-	case ".html", ".htm":
-		return "html"
-	case ".css":
-		return "css"
-	case ".md":
-		return "markdown"
-	case ".yaml", ".yml":
-		return "yaml"
-	case ".sql":
-		return "sql"
-	default:
+	if ext == "" {
 		return ""
 	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, info := range m.servers {
+		for _, registered := range info.Extensions {
+			if strings.ToLower(registered) == ext {
+				return info.LanguageID
+			}
+		}
+	}
+
+	return ""
 }
 
 func (m *Manager) getOrStartServer(filePath string) (*ServerInfo, error) {
@@ -106,8 +273,12 @@ func (m *Manager) getOrStartServer(filePath string) (*ServerInfo, error) {
 	}
 	m.mu.Unlock()
 
-	// Start the server
-	client, err := NewClient(info.Command, info.Args...)
+	cmd := info.Command
+	if localBin := FindLocalBin(info.Command); localBin != "" {
+		cmd = localBin
+	}
+
+	client, err := NewClient(cmd, info.Args...)
 	if err != nil {
 		return nil, fmt.Errorf("start %s server: %w", langID, err)
 	}
@@ -314,6 +485,111 @@ func (m *Manager) GetDefinition(filePath string, line, col int) ([]Location, err
 		}
 	}
 	return locations, nil
+}
+
+// GetReferences returns all references to a symbol
+func (m *Manager) GetReferences(filePath string, line, col int, includeDecl bool) ([]FrontendLocation, error) {
+	info, err := m.getOrStartServer(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	var result interface{}
+	err = info.client.Call("textDocument/references", ReferenceParams{
+		TextDocument: TextDocumentIdentifier{URI: DocumentURI(filePath)},
+		Position:     Position{Line: line, Character: col},
+		Context:      ReferenceContext{IncludeDeclaration: includeDecl},
+	}, &result)
+	if err != nil {
+		return nil, err
+	}
+
+	var locations []Location
+	if locs, ok := result.([]interface{}); ok {
+		for _, l := range locs {
+			b, _ := json.Marshal(l)
+			var loc Location
+			json.Unmarshal(b, &loc)
+			locations = append(locations, loc)
+		}
+	} else {
+		b, _ := json.Marshal(result)
+		var loc Location
+		if err := json.Unmarshal(b, &loc); err == nil {
+			locations = append(locations, loc)
+		}
+	}
+
+	frontend := make([]FrontendLocation, 0, len(locations))
+	for _, loc := range locations {
+		frontend = append(frontend, FrontendLocation{
+			FilePath: strings.TrimPrefix(loc.URI, "file:///"),
+			Line:     loc.Range.Start.Line,
+			Col:      loc.Range.Start.Character,
+			EndLine:  loc.Range.End.Line,
+			EndCol:   loc.Range.End.Character,
+		})
+	}
+	return frontend, nil
+}
+
+// GetCodeActions returns code actions for a range
+func (m *Manager) GetCodeActions(filePath string, startLine, startCol, endLine, endCol int) ([]FrontendCodeAction, error) {
+	info, err := m.getOrStartServer(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	var result interface{}
+	err = info.client.Call("textDocument/codeAction", CodeActionParams{
+		TextDocument: TextDocumentIdentifier{URI: DocumentURI(filePath)},
+		Range: Range{
+			Start: Position{Line: startLine, Character: startCol},
+			End:   Position{Line: endLine, Character: endCol},
+		},
+		Context: CodeActionContext{Diagnostics: []Diagnostic{}},
+	}, &result)
+	if err != nil {
+		return nil, err
+	}
+
+	var actions []CodeAction
+	if items, ok := result.([]interface{}); ok {
+		for _, item := range items {
+			b, _ := json.Marshal(item)
+			var action CodeAction
+			if err := json.Unmarshal(b, &action); err == nil {
+				actions = append(actions, action)
+			}
+		}
+	}
+
+	frontend := make([]FrontendCodeAction, 0, len(actions))
+	for _, a := range actions {
+		fa := FrontendCodeAction{
+			Title: a.Title,
+			Kind:  a.Kind,
+		}
+		if a.Edit != nil && a.Edit.Changes != nil {
+			fa.Edit = make(map[string][]FrontendTextEdit)
+			for uri, edits := range a.Edit.Changes {
+				fp := strings.TrimPrefix(uri, "file:///")
+				fe := make([]FrontendTextEdit, 0, len(edits))
+				for _, e := range edits {
+					fe = append(fe, FrontendTextEdit{
+						NewText:   e.NewText,
+						StartLine: e.Range.Start.Line,
+						StartCol:  e.Range.Start.Character,
+						EndLine:   e.Range.End.Line,
+						EndCol:    e.Range.End.Character,
+					})
+				}
+				fa.Edit[fp] = fe
+			}
+		}
+		frontend = append(frontend, fa)
+	}
+	return frontend, nil
 }
 
 // Shutdown stops all language servers

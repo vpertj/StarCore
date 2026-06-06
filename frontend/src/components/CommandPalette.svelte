@@ -12,6 +12,7 @@
     splitEditor,
     closeSplit,
     currentProject,
+    openProjectFolder,
   } from "../stores/app.js";
   import { sendMessage } from "../stores/ai.js";
 
@@ -164,9 +165,7 @@
         closeSplit();
         break;
       case "file.open-folder":
-        window.backend?.OpenFolder().then((p) => {
-          if (p) currentProject.set(p);
-        });
+        openProjectFolder();
         break;
       case "editor.format":
         sendMessage("/format code");

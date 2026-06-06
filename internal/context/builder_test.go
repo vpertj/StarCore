@@ -121,8 +121,8 @@ func TestBuildContextMessage_ContextFilesTruncation(t *testing.T) {
 	}
 
 	msg := b.BuildContextMessage(req)
-	if !contains(msg, "[truncated]") {
-		t.Error("expected truncated marker for large file")
+	if !contains(msg, "omitted") && !contains(msg, "[truncated]") {
+		t.Error("expected truncated/omitted marker for large file")
 	}
 }
 

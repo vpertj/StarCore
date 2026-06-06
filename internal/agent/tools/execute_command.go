@@ -1,8 +1,10 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -33,8 +35,8 @@ func (t *ExecuteCommandTool) Parameters() agent.ToolParameters {
 	return agent.ToolParameters{
 		Type: "object",
 		Properties: map[string]agent.ToolParamProp{
-			"command":    {Type: "string", Description: "Shell command to execute"},
-			"cwd":        {Type: "string", Description: "Working directory (optional, defaults to project root)"},
+			"command":     {Type: "string", Description: "Shell command to execute"},
+			"cwd":         {Type: "string", Description: "Working directory (optional, defaults to project root)"},
 			"timeout_sec": {Type: "number", Description: "Command timeout in seconds (optional, default 30, max 120)"},
 		},
 		Required: []string{"command"},
@@ -49,7 +51,7 @@ func (t *ExecuteCommandTool) Execute(ctx context.Context, args map[string]any) (
 
 	cwd, _ := args["cwd"].(string)
 	if cwd == "" {
-		cwd = "." // default to current directory (project root in dev mode)
+		cwd = "."
 	}
 
 	timeoutSec := 30
@@ -73,36 +75,82 @@ func (t *ExecuteCommandTool) Execute(ctx context.Context, args map[string]any) (
 		cmd.Dir = cwd
 	}
 
-	output, err := cmd.CombinedOutput()
-	outStr := string(output)
+	// Stream stdout and stderr simultaneously
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return "", fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
 
-	// Sanitize: replace null bytes and ensure valid UTF-8.
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("failed to start command: %w", err)
+	}
+
+	// Read both streams concurrently
+	var stdoutBuf, stderrBuf bytes.Buffer
+	doneCh := make(chan struct{}, 2)
+
+	go func() {
+		io.Copy(&stdoutBuf, stdoutPipe)
+		doneCh <- struct{}{}
+	}()
+	go func() {
+		io.Copy(&stderrBuf, stderrPipe)
+		doneCh <- struct{}{}
+	}()
+
+	// Wait for both streams to finish
+	<-doneCh
+	<-doneCh
+
+	// Wait for process to exit
+	waitErr := cmd.Wait()
+
+	// Combine output: stdout first, then stderr
+	var combined strings.Builder
+	if stdoutBuf.Len() > 0 {
+		combined.Write(stdoutBuf.Bytes())
+	}
+	if stderrBuf.Len() > 0 {
+		if combined.Len() > 0 {
+			combined.WriteByte('\n')
+		}
+		combined.WriteString("[stderr]\n")
+		combined.Write(stderrBuf.Bytes())
+	}
+
+	outStr := combined.String()
+
+	// Sanitize
 	outStr = strings.ReplaceAll(outStr, "\x00", "")
 	if !utf8.ValidString(outStr) {
 		outStr = string([]rune(outStr))
 	}
 
-	// Truncate long output.
-	truncated := false
+	// Smart truncation: keep head + tail for long output
 	if len(outStr) > maxCommandOutput {
-		outStr = outStr[:maxCommandOutput]
-		truncated = true
+		headSize := maxCommandOutput * 3 / 4
+		tailSize := maxCommandOutput / 4
+		outStr = outStr[:headSize] + fmt.Sprintf("\n... [%d chars omitted] ...\n", len(outStr)-headSize-tailSize) + outStr[len(outStr)-tailSize:]
 	}
 
 	if execCtx.Err() == context.DeadlineExceeded {
 		return "", fmt.Errorf("command timed out after %ds. Partial output:\n%s", timeoutSec, outStr)
 	}
 
-	if err != nil {
+	if waitErr != nil {
+		if outStr == "" {
+			return "", fmt.Errorf("exit code != 0: %v", waitErr)
+		}
 		return "", fmt.Errorf("exit code != 0. Output:\n%s", outStr)
 	}
 
 	outStr = strings.TrimSpace(outStr)
 	if outStr == "" {
 		outStr = "(no output)"
-	}
-	if truncated {
-		outStr += fmt.Sprintf("\n... [output truncated at %d chars]", maxCommandOutput)
 	}
 
 	return outStr, nil

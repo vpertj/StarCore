@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -132,12 +134,7 @@ func NewApp() *App {
 		toolExec.Register(t)
 	}
 
-	skillExec := skill.NewExecutor(skillReg, mgr, toolExec)
-
 	agentTools.SkillToolRegistry = skillReg
-	agentTools.SkillToolExecutor = skillExec
-	toolExec.Register(agentTools.NewSkillTool())
-	toolExec.Register(agentTools.NewSubAgentTool())
 	agentTools.SubAgentToolExec = toolExec
 	agentTools.SubAgentProviderMgr = mgr
 
@@ -159,6 +156,13 @@ func NewApp() *App {
 	lspMgr.RegisterServer("typescript", "typescript-language-server", []string{"--stdio"}, []string{".ts", ".tsx"})
 	lspMgr.RegisterServer("python", "pyright-langserver", []string{"--stdio"}, []string{".py"})
 
+	// --- Skill executor (after memStore) ---
+	skillExec := skill.NewExecutor(skillReg, mgr, toolExec, memStore)
+	agentTools.SkillToolExecutor = skillExec
+	toolExec.Register(agentTools.NewSkillTool())
+	toolExec.Register(agentTools.NewSubAgentTool())
+	agentTools.SubAgentMemoryStore = memStore
+
 	app.providerMgr = mgr
 	app.agentReg = reg
 	app.skillReg = skillReg
@@ -168,6 +172,8 @@ func NewApp() *App {
 	app.mcpMgr = mcpMgr
 	app.lspMgr = lspMgr
 	app.fileWatcher = watcher.New("")
+
+	app.loadCustomLSPServers()
 
 	// --- Internal services ---
 	app.contextBuilder = ictx.NewBuilder(mgr, memStore)
@@ -475,6 +481,16 @@ func (a *App) StopGenerating() {
 	a.aiService.Stop()
 }
 
+// ContinueAgentLoop adds extra iterations to the running agent loop.
+func (a *App) ContinueAgentLoop(extraLoops int) {
+	a.aiService.ContinueLoop(extraLoops)
+}
+
+// RespondToAsk is called by the frontend when the user answers an ask_user prompt.
+func (a *App) RespondToAsk(response agentTools.AskUserResponse) bool {
+	return a.aiService.RespondToAsk(response)
+}
+
 // ------- Provider pass-through -------
 
 // GetProviders returns all registered AI providers.
@@ -667,6 +683,24 @@ func (a *App) SaveMessage(msg memory.Message) error {
 	return a.memoryStore.SaveMessage(&msg)
 }
 
+// DeleteMessage deletes a single message by ID.
+func (a *App) DeleteMessage(id string) error {
+	if a.memoryStore == nil {
+		return nil
+	}
+	return a.memoryStore.DeleteMessage(id)
+}
+
+// DeleteConversationMessages deletes all messages for a conversation (localStorage cleanup helper).
+func (a *App) DeleteConversationMessages(convID string) error {
+	if a.memoryStore == nil {
+		return nil
+	}
+	// Messages are cascade-deleted with DeleteConversation; this is a no-op for SQLite.
+	// Exists for API symmetry with frontend cleanup of localStorage.
+	return nil
+}
+
 // GetKnowledge returns knowledge entries for a project.
 func (a *App) GetKnowledge(projectPath string) ([]memory.Knowledge, error) {
 	if a.memoryStore == nil {
@@ -706,6 +740,11 @@ func (a *App) ExecuteToolCall(call agent.ToolCall) (*agent.ToolResult, error) {
 // SetToolAutoApprove sets auto-approval for a tool.
 func (a *App) SetToolAutoApprove(toolID string, approve bool) {
 	a.toolExec.SetAutoApprove(toolID, approve)
+}
+
+// RespondToolApproval is called by the frontend when the user approves/rejects a tool call.
+func (a *App) RespondToolApproval(callID string, approved bool) bool {
+	return a.toolExec.RespondApproval(callID, approved)
 }
 
 // ------- Token usage -------
@@ -793,9 +832,171 @@ func (a *App) LSPDefinition(filePath string, line int, col int) ([]lsp.Location,
 	return a.lspMgr.GetDefinition(filePath, line, col)
 }
 
+// LSPReferences returns all references to a symbol.
+func (a *App) LSPReferences(filePath string, line int, col int, includeDecl bool) ([]lsp.FrontendLocation, error) {
+	return a.lspMgr.GetReferences(filePath, line, col, includeDecl)
+}
+
+// LSPCodeActions returns code actions for a range.
+func (a *App) LSPCodeActions(filePath string, startLine int, startCol int, endLine int, endCol int) ([]lsp.FrontendCodeAction, error) {
+	return a.lspMgr.GetCodeActions(filePath, startLine, startCol, endLine, endCol)
+}
+
 // LSPShutdown shuts down all LSP servers.
 func (a *App) LSPShutdown() {
 	a.lspMgr.Shutdown()
+}
+
+// GetLSPServers returns all registered LSP server configurations.
+func (a *App) GetLSPServers() []lsp.FrontendServerInfo {
+	return a.lspMgr.ListServers()
+}
+
+// AddLSPServer adds a custom LSP server configuration.
+func (a *App) AddLSPServer(langID string, command string, args []string, extensions []string) error {
+	a.lspMgr.RegisterCustomServer(langID, command, args, extensions)
+	return a.saveCustomLSPServers()
+}
+
+// RemoveLSPServer removes a custom LSP server configuration.
+func (a *App) RemoveLSPServer(langID string) error {
+	a.lspMgr.UnregisterServer(langID)
+	return a.saveCustomLSPServers()
+}
+
+func (a *App) saveCustomLSPServers() error {
+	servers := a.lspMgr.ListServers()
+	custom := make([]lsp.FrontendServerInfo, 0)
+	for _, s := range servers {
+		if s.Custom {
+			custom = append(custom, s)
+		}
+	}
+	data, err := json.MarshalIndent(custom, "", "  ")
+	if err != nil {
+		return err
+	}
+	configPath := filepath.Join(configDir(), "lsp_servers.json")
+	return ioutil.WriteFile(configPath, data, 0644)
+}
+
+func (a *App) loadCustomLSPServers() {
+	configPath := filepath.Join(configDir(), "lsp_servers.json")
+	data, err := ioutil.ReadFile(configPath)
+	if err != nil {
+		return
+	}
+	var servers []lsp.FrontendServerInfo
+	if err := json.Unmarshal(data, &servers); err != nil {
+		return
+	}
+	for _, s := range servers {
+		a.lspMgr.RegisterCustomServer(s.LanguageID, s.Command, s.Args, s.Extensions)
+	}
+}
+
+// GetLanguagePackages returns all preset language packages.
+func (a *App) GetLanguagePackages() []lsp.LanguagePackage {
+	return lsp.GetPresetLanguagePackages()
+}
+
+// InstallLanguagePackage downloads or installs a language server.
+func (a *App) InstallLanguagePackage(pkgID string) (string, error) {
+	for _, pkg := range lsp.PresetLanguagePackages {
+		if pkg.ID != pkgID {
+			continue
+		}
+		if pkg.DownloadURL != "" {
+			binDir := filepath.Join(configDir(), "bin")
+			os.MkdirAll(binDir, 0755)
+			targetPath := filepath.Join(binDir, pkg.DownloadFile)
+			if _, err := os.Stat(targetPath); err == nil {
+				return "已安装: " + targetPath, nil
+			}
+			tmpPath := targetPath + ".tmp"
+			resp, err := http.Get(pkg.DownloadURL)
+			if err != nil {
+				return "", fmt.Errorf("下载失败: %w", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				return "", fmt.Errorf("下载失败: HTTP %d", resp.StatusCode)
+			}
+			f, err := os.Create(tmpPath)
+			if err != nil {
+				return "", fmt.Errorf("创建文件失败: %w", err)
+			}
+			if _, err := io.Copy(f, resp.Body); err != nil {
+				f.Close()
+				os.Remove(tmpPath)
+				return "", fmt.Errorf("写入失败: %w", err)
+			}
+			f.Close()
+			if strings.HasSuffix(pkg.DownloadURL, ".gz") {
+				if err := decompressGz(tmpPath, targetPath); err != nil {
+					os.Remove(tmpPath)
+					return "", fmt.Errorf("解压失败: %w", err)
+				}
+				os.Remove(tmpPath)
+			} else {
+				os.Rename(tmpPath, targetPath)
+			}
+			os.Chmod(targetPath, 0755)
+			return "安装完成: " + targetPath, nil
+		}
+		if pkg.InstallCmd != "" {
+			output, err := a.fileService.ExecuteCommand(pkg.InstallCmd)
+			if err != nil {
+				return output, fmt.Errorf("安装失败: %w", err)
+			}
+			return output, nil
+		}
+		return "", fmt.Errorf("该语言服务器需手动安装: %s", pkg.Command)
+	}
+	return "", fmt.Errorf("未找到语言包: %s", pkgID)
+}
+
+func decompressGz(src, dst string) error {
+	f, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	gz, err := ioutil.ReadAll(f)
+	if err != nil {
+		return err
+	}
+	r, err := gzip.NewReader(bytes.NewReader(gz))
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, r)
+	return err
+}
+
+// CheckCommandExists checks if a command is available on the system PATH or in local bin dir.
+func (a *App) CheckCommandExists(command string) bool {
+	if lsp.FindLocalBin(command) != "" {
+		return true
+	}
+	_, err := a.fileService.ExecuteCommand(fmt.Sprintf("where %s 2>nul || which %s 2>/dev/null", command, command))
+	return err == nil
+}
+
+// SetProxy configures the HTTP proxy for all AI providers.
+func (a *App) SetProxy(proxyURL string, noProxy string) {
+	provider.SetGlobalProxy(proxyURL, noProxy)
+}
+
+// GetProxy returns the current HTTP proxy configuration.
+func (a *App) GetProxy() (string, string) {
+	return provider.GetGlobalProxy()
 }
 
 // ReadFileWithLSP reads a file and notifies LSP that it's opened.

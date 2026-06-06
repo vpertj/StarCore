@@ -1,16 +1,20 @@
 <script>
- import { onMount } from 'svelte'
- import { fade, fly } from 'svelte/transition'
- import { aiPanelVisible, aiPanelWidth } from '../stores/ui.js'
- import AIPanelHeader from './AIPanelHeader.svelte'
- import ContextPreview from './ContextPreview.svelte'
- import DiffViewer from './DiffViewer.svelte'
- import { pendingDiff, diffVisible, applyDiff, dismissDiff, showDiffForFile } from '../stores/diffPreview.js'
- import { messages, isGenerating, sendMessage, addMessage, clearMessages, thinkingContent, contextFiles, contextCode, stopGenerating, toolCalls, approveToolCall, rejectToolCall, selectedCode, activeFileContent, detectTaskType, classifyError, retryLastMessage } from '../stores/ai.js'
- import { skills, executeSkill, isSkillExecuting, skillResult, executingSkillId, clearSkillResult, loadSkills } from '../stores/skill.js'
- import { activeProviderId, activeModelId, allAvailableModels, builtinProviders, loadModels } from '../stores/provider.js'
- import { activeAgentId, agents, loadAgents } from '../stores/agent.js'
- import { aiMode } from '../stores/ai.js'
+  import { onMount } from 'svelte'
+  import { fade, fly } from 'svelte/transition'
+  import { aiPanelVisible, aiPanelWidth } from '../stores/ui.js'
+  import AIPanelHeader from './AIPanelHeader.svelte'
+  import ContextPreview from './ContextPreview.svelte'
+  import DiffViewer from './DiffViewer.svelte'
+  import { pendingDiff, diffVisible, applyDiff, dismissDiff, showDiffForFile } from '../stores/diffPreview.js'
+   import { messages, isGenerating, sendMessage, addMessage, clearMessages, thinkingContent, contextFiles, contextCode, stopGenerating, toolCalls, approveToolCall, rejectToolCall, selectedCode, activeFileContent, detectTaskType, classifyError, retryLastMessage, pendingAsk, persistMessages, loopExhausted, continueLoop } from '../stores/ai.js'
+   import { get } from 'svelte/store'
+  import { skills, executeSkill, isSkillExecuting, skillResult, executingSkillId, clearSkillResult, loadSkills } from '../stores/skill.js'
+  import { activeProviderId, activeModelId, allAvailableModels, builtinProviders, loadModels } from '../stores/provider.js'
+   import { activeAgentId, agents, loadAgents } from '../stores/agent.js'
+   import { activeConversationId } from '../stores/memory.js'
+  import { aiMode } from '../stores/ai.js'
+  import { Marked } from 'marked'
+  import hljs from 'highlight.js'
  import { masterMode } from '../stores/masterMode.js'
 
  import { currentProject, fileTree, activeFile } from '../stores/app.js'
@@ -57,9 +61,7 @@ import { activeFileDiagnostics } from '../stores/diagnostics.js'
 
  $: diagnostics = $activeFileDiagnostics?.map(d => d.message) || []
 
- // Enforce mode: Master = Build, non-Master = Chat
- $: if (!$masterMode && $aiMode !== 'chat') aiMode.set('chat')
- $: if ($masterMode && $aiMode !== 'build') aiMode.set('build')
+ // Mode can be freely switched by user; auto-detect happens in sendMessage()
 
  // Update dropdown position whenever shown - delay for DOM render
  $: if (showSkillHint || showFilePicker) {
@@ -318,31 +320,35 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
  }
 
  /** @param {string} content */
- function formatMessage(content) {
-   const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g
-   let formatted = content
+  const marked = new Marked({
+    renderer: {
+      code({ text, lang }) {
+        const language = lang && hljs.getLanguage(lang) ? lang : 'plaintext'
+        const highlighted = hljs.highlight(text, { language }).value
+        const dataCode = text.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+        return `<div class="code-block">
+          <div class="code-header">
+            <span class="code-lang">${language}</span>
+            <div class="code-actions">
+              <button class="code-action-btn copy-btn" onclick="navigator.clipboard.writeText(this.closest('.code-block').querySelector('code').textContent)">Copy</button>
+              <button class="code-action-btn apply-btn" data-code="${dataCode}">Apply</button>
+              <button class="code-action-btn run-btn" data-code="${dataCode}">Run</button>
+              <button class="code-action-btn insert-btn" data-code="${dataCode}">Insert</button>
+            </div>
+          </div>
+          <pre><code class="hljs language-${language}">${highlighted}</code></pre>
+        </div>`
+      }
+    }
+  })
 
-   formatted = formatted.replace(codeBlockRegex, (/** @type {string} */ _match, /** @type {string} */ lang, /** @type {string} */ code) => {
-     const escapedCode = escapeHtml(code)
-     const dataCode = code.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
-     return `<div class="code-block">
-       <div class="code-header">
-         <span class="code-lang">${lang || 'code'}</span>
-         <div class="code-actions">
-           <button class="code-action-btn copy-btn" onclick="navigator.clipboard.writeText(this.closest('.code-block').querySelector('code').textContent)">Copy</button>
-           <button class="code-action-btn apply-btn" data-code="${dataCode}">Apply</button>
-           <button class="code-action-btn run-btn" data-code="${dataCode}">Run</button>
-           <button class="code-action-btn insert-btn" data-code="${dataCode}">Insert</button>
-         </div>
-       </div>
-       <pre><code>${escapedCode}</code></pre>
-     </div>`
-   })
-
-   formatted = formatted.replace(/`([^`]+)`/g, '<code>$1</code>')
-   formatted = formatted.replace(/\n/g, '<br>')
-   return formatted
- }
+  function formatMessage(content) {
+    try {
+      return marked.parse(content || '')
+    } catch {
+      return escapeHtml(content || '')
+    }
+  }
 
  /** @param {string} text */
  function escapeHtml(text) {
@@ -391,18 +397,39 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
    if (msg) navigator.clipboard.writeText(msg.content)
  }
 
- /** @param {number} msgIdx */
- function deleteMessage(msgIdx) {
-   messages.update(msgs => msgs.filter((_, idx) => idx !== msgIdx))
- }
+  /** @param {number} msgIdx */
+  async function deleteMessage(msgIdx) {
+    const convId = get(activeConversationId)
+    if (convId) {
+      const msgId = `${convId}-${msgIdx}`
+      try {
+        if (window.backend?.DeleteMessage) {
+          await window.backend.DeleteMessage(msgId)
+        }
+      } catch (e) {
+        console.error('Failed to delete message from backend:', e)
+      }
+      // Also clean localStorage
+      try {
+        const key = `starcore-messages-${convId}`
+        const saved = JSON.parse(localStorage.getItem(key) || '[]')
+        const updated = saved.filter((/** @type {{id: string}} */ m) => m.id !== msgId)
+        localStorage.setItem(key, JSON.stringify(updated))
+      } catch {}
+    }
+    messages.update(msgs => msgs.filter((_, idx) => idx !== msgIdx))
+  }
 
- /** @param {number} msgIdx */
- function regenerateMessage(msgIdx) {
-   const userMsg = $messages.slice(0, msgIdx).reverse().find(m => m.role === 'user')
-   if (!userMsg) return
-   messages.update(msgs => msgs.slice(0, msgIdx))
-   sendMessage(userMsg.content)
- }
+  /** @param {number} msgIdx */
+  async function regenerateMessage(msgIdx) {
+    const userMsg = $messages.slice(0, msgIdx).reverse().find(m => m.role === 'user')
+    if (!userMsg) return
+    // Persist current messages before truncating so history is preserved
+    const { persistMessages } = await import('../stores/ai.js')
+    await persistMessages()
+    messages.update(msgs => msgs.slice(0, msgIdx))
+    sendMessage(userMsg.content)
+  }
 
  /** @param {number} msgIdx */
  function editMessage(msgIdx) {
@@ -521,41 +548,55 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
         </div>
       {#if $toolCalls.length > 0}
           {#each $toolCalls as tc}
+            {@const fm = tc.fileMeta}
+            {@const opLabel = fm ? (fm.operation === 'read' ? 'Read' : fm.operation === 'write' ? 'Write' : fm.operation === 'edit' ? 'Edit' : fm.operation === 'search' ? 'Search' : fm.operation === 'glob' ? 'Glob' : fm.operation === 'exec' ? 'Run' : tc.name) : tc.name}
+            {@const fileName = fm?.filePath ? fm.filePath.split('/').pop().split('\\').pop() : ''}
+            {@const lineInfo = fm?.summary || (fm?.startLine ? `L${fm.startLine}${fm.endLine && fm.endLine !== fm.startLine ? '-'+fm.endLine : ''}` : '')}
             <div class="panel-card mt-2 text-xs" in:fly={{ y: 8, duration: 200 }}>
               <div class="flex items-center gap-2">
-                <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: var(--warning);">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.57 2.572-1.065z" />
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-                <span style="color: var(--warning);">{tc.name}</span>
+                {#if fm?.operation === 'read'}
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: #64b5f6;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                {:else if fm?.operation === 'write' || fm?.operation === 'edit'}
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: #ff8c00;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                {:else if fm?.operation === 'search' || fm?.operation === 'glob'}
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: #ab47bc;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                {:else if fm?.operation === 'exec'}
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: var(--text-muted);"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                {:else}
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: var(--warning);"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.57 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                {/if}
+                <span class="font-medium" style="color: {fm?.operation === 'read' ? '#64b5f6' : fm?.operation === 'write' || fm?.operation === 'edit' ? '#ff8c00' : fm?.operation === 'search' || fm?.operation === 'glob' ? '#ab47bc' : 'var(--warning)'};">{opLabel}</span>
+                {#if fileName}
+                  <span style="color: var(--text-primary);">{fileName}</span>
+                {/if}
+                {#if lineInfo}
+                  <span style="color: var(--text-muted);">{lineInfo}</span>
+                {/if}
                 {#if tc.status === 'executing'}
-                  <span class="animate-pulse-subtle" style="color: var(--text-muted);">{$t('ai.skill.executing')}</span>
+                  <span class="animate-pulse-subtle" style="color: var(--text-muted);">...</span>
                 {:else if tc.status === 'completed'}
-                  <span style="color: var(--success);">完成</span>
+                  <span style="color: var(--success);">✓</span>
                 {:else if tc.status === 'error'}
-                  <span style="color: var(--error);">出错</span>
+                  <span style="color: var(--error);">✗</span>
                 {:else if tc.status === 'pending_approval'}
-                  <span style="color: var(--warning);">{$t('tool.pending')}</span>
                   <button class="btn btn-success btn-sm" onclick={() => approveToolCall(tc.id)}>{$t('tool.approve')}</button>
                   <button class="btn btn-danger btn-sm" onclick={() => rejectToolCall(tc.id)}>{$t('tool.reject')}</button>
                 {:else if tc.status === 'rejected'}
-                  <span style="color: var(--error);">{$t('tool.reject')}</span>
+                  <span style="color: var(--error);">✗</span>
+                {/if}
+                {#if tc.result && tc.status === 'completed' && !toolExpanded[tc.id]}
+                  <button class="ml-auto px-1 rounded text-[10px]" style="color: var(--text-muted); background: var(--bg-primary);" onclick={() => toolExpanded[tc.id] = true}>▸</button>
                 {/if}
               </div>
-              {#if tc.result && tc.status === 'completed'}
-                {@const lines = tc.result.split('\n').filter(l => l)}
-                {@const summary = tc.name + ': ' + (lines.length > 1 ? lines[0].slice(0, 50) + '... (' + lines.length + ' lines)' : tc.result.slice(0, 70))}
-                {@const expanded = toolExpanded[tc.id] || false}
+              {#if tc.result && tc.status === 'completed' && toolExpanded[tc.id]}
                 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-                <div class="mt-1 text-xs cursor-pointer" style="color: var(--text-muted);" onclick={() => toolExpanded[tc.id] = !expanded}>
-                  <span class="truncate">{summary}</span>
-                  {#if expanded}
-                    <pre class="mt-1 p-2 rounded overflow-x-auto text-xs" style="background-color: var(--bg-primary); color: var(--text-primary); max-height: 150px; overflow-y: auto;">{tc.result.slice(0, 3000)}</pre>
-                  {/if}
+                <div class="mt-1 text-xs" style="color: var(--text-muted);">
+                  <pre class="p-2 rounded overflow-x-auto text-xs" style="background-color: var(--bg-primary); color: var(--text-primary); max-height: 200px; overflow-y: auto;">{tc.result.slice(0, 5000)}</pre>
+                  <button class="mt-1 px-2 py-0.5 rounded text-[10px]" style="color: var(--text-muted); background: var(--bg-primary);" onclick={() => toolExpanded[tc.id] = false}>收起</button>
                 </div>
               {/if}
               {#if tc.error}
-                <span class="text-xs" style="color: var(--error);">{tc.name}: {tc.error.slice(0, 80)}</span>
+                <span class="text-xs" style="color: var(--error);">{tc.error.slice(0, 120)}</span>
               {/if}
             </div>
           {/each}
@@ -615,21 +656,7 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
                 {/if}
               </div>
 
-              {#if message.role === 'assistant' && msgIdx === $messages.length - 1 && $thinkingContent}
-                <div class="mt-1">
-                  <button class="btn btn-ghost btn-sm gap-1" onclick={() => toggleThinking(msgIdx)}>
-                    <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="transform: rotate({thinkingVisibleMap.get(msgIdx) ? 90 : 0}deg);">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-                    </svg>
-                    {$t('ai.thinking')}
-                  </button>
-                  {#if thinkingVisibleMap.get(msgIdx)}
-                    <div class="mt-1 p-2 rounded text-xs whitespace-pre-wrap panel-card">
-                      {$thinkingContent}
-                    </div>
-                  {/if}
-                </div>
-              {/if}
+
             </div>
 
             <div class="absolute right-0 top-0 opacity-0 group-hover:opacity-100 flex gap-0.5 transition-opacity">
@@ -817,9 +844,7 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
           {#if activeTC}
             <span class="truncate">⏳ 等待批准: {activeTC.name}</span>
           {:else if lastDone}
-            <span class="truncate">{lastDone.name} 完成 — AI 正在分析结果</span>
-          {:else if $thinkingContent}
-            <span>AI 正在思考</span>
+            <span class="truncate">{lastDone.name} 完成</span>
           {:else}
             <span>AI 正在处理</span>
           {/if}
@@ -829,6 +854,98 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
         <div class="flex items-center gap-1 px-3 py-1 text-xs" style="color: #2ea043;" transition:fade={{ duration: 300 }}>
           <span>✓</span>
           <span>已完成 — 可以继续输入</span>
+        </div>
+      {/if}
+
+      <!-- Current model indicator -->
+      <div class="px-1 text-[10px]" style="color: var(--text-muted);">
+        {#if activeModel}
+          <span class="font-medium" style="color: var(--text-secondary);">{displayProviderName}</span>
+          <span class="mx-1">·</span>
+          <span>{activeModel.name || activeModel.id}</span>
+        {:else}
+          <span>未选择模型</span>
+        {/if}
+      </div>
+
+      {#if $pendingAsk}
+        <div class="mx-3 p-3 rounded-lg border" style="background-color: var(--bg-secondary); border-color: var(--accent);" transition:fly={{ y: 8, duration: 200 }}>
+          <div class="flex items-start gap-2">
+            <span class="text-sm mt-0.5">🤔</span>
+            <div class="flex-1 space-y-2">
+              <p class="text-sm font-medium" style="color: var(--text-primary);">{$pendingAsk.question}</p>
+              {#if $pendingAsk.options.length > 0}
+                <div class="flex flex-wrap gap-1.5">
+                  {#each $pendingAsk.options as opt, i}
+                    <button
+                      class="px-3 py-1 rounded text-xs font-medium transition-colors"
+                      style="background-color: var(--accent); color: #ffffff;"
+                      onclick={async () => {
+                        const req = $pendingAsk
+                        pendingAsk.set(null)
+                        if (window.backend?.RespondToAsk) {
+                          await window.backend.RespondToAsk({ id: req.id, answer: opt })
+                        }
+                      }}
+                    >{opt}</button>
+                  {/each}
+                </div>
+              {/if}
+              <div class="flex gap-2">
+                <input
+                  type="text"
+                  class="flex-1 px-2 py-1 rounded text-xs border"
+                  style="background-color: var(--bg-primary); color: var(--text-primary); border-color: var(--border);"
+                  placeholder="输入你的回复..."
+                  id="ask-user-input"
+                />
+                <button
+                  class="px-3 py-1 rounded text-xs font-medium"
+                  style="background-color: var(--accent); color: #ffffff;"
+                  onclick={async () => {
+                    const input = /** @type {HTMLInputElement} */ (document.getElementById('ask-user-input'))
+                    const answer = input?.value?.trim()
+                    if (!answer) return
+                    const req = $pendingAsk
+                    pendingAsk.set(null)
+                    if (window.backend?.RespondToAsk) {
+                      await window.backend.RespondToAsk({ id: req.id, answer })
+                    }
+                  }}
+                >回复</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      {/if}
+
+      {#if $loopExhausted}
+        <div class="mx-3 p-3 rounded-lg border" style="background-color: var(--bg-secondary); border-color: var(--warning, #f59e0b);" transition:fly={{ y: 8, duration: 200 }}>
+          <div class="flex items-start gap-2">
+            <span class="text-sm mt-0.5">⚠️</span>
+            <div class="flex-1 space-y-2">
+              <p class="text-sm font-medium" style="color: var(--text-primary);">
+                任务已达到最大执行轮次（{$loopExhausted.maxLoops}轮，{$loopExhausted.mode}模式）
+              </p>
+              <div class="flex flex-wrap gap-2">
+                <button
+                  class="px-3 py-1 rounded text-xs font-medium transition-colors"
+                  style="background-color: var(--accent); color: #ffffff;"
+                  onclick={() => continueLoop(10)}
+                >继续 +10轮</button>
+                <button
+                  class="px-3 py-1 rounded text-xs font-medium transition-colors"
+                  style="background-color: var(--accent); color: #ffffff;"
+                  onclick={() => continueLoop(20)}
+                >继续 +20轮</button>
+                <button
+                  class="px-3 py-1 rounded text-xs font-medium transition-colors"
+                  style="background-color: var(--bg-primary); color: var(--text-secondary); border: 1px solid var(--border);"
+                  onclick={() => loopExhausted.set(null)}
+                >在新对话中继续</button>
+              </div>
+            </div>
+          </div>
         </div>
       {/if}
 
@@ -906,8 +1023,8 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
 
         <button
           class={$isGenerating ? 'btn btn-danger' : (inputValue.trim() ? 'btn btn-primary' : 'btn btn-secondary')}
-          onclick={handleSend}
-          disabled={$isGenerating ? false : !inputValue.trim()}
+          onclick={() => { if ($isGenerating) { stopGenerating() } else { handleSend() } }}
+          disabled={!inputValue.trim() && !$isGenerating}
         >
           {#if $isGenerating}
             <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

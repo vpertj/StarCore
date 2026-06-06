@@ -22,9 +22,9 @@ type RPCError struct {
 }
 
 type InitializeParams struct {
-	ProtocolVersion string              `json:"protocolVersion"`
-	Capabilities    ClientCapabilities  `json:"capabilities"`
-	ClientInfo      ClientInfo          `json:"clientInfo"`
+	ProtocolVersion string             `json:"protocolVersion"`
+	Capabilities    ClientCapabilities `json:"capabilities"`
+	ClientInfo      ClientInfo         `json:"clientInfo"`
 }
 
 type ClientCapabilities struct {
@@ -38,9 +38,9 @@ type ClientInfo struct {
 }
 
 type InitializeResult struct {
-	ProtocolVersion string              `json:"protocolVersion"`
-	Capabilities    ServerCapabilities  `json:"capabilities"`
-	ServerInfo      ServerInfo          `json:"serverInfo"`
+	ProtocolVersion string             `json:"protocolVersion"`
+	Capabilities    ServerCapabilities `json:"capabilities"`
+	ServerInfo      ServerInfo         `json:"serverInfo"`
 }
 
 type ServerCapabilities struct {
@@ -63,8 +63,8 @@ type ServerInfo struct {
 }
 
 type ToolInfo struct {
-	Name        string              `json:"name"`
-	Description string              `json:"description"`
+	Name        string               `json:"name"`
+	Description string               `json:"description"`
 	InputSchema agent.ToolParameters `json:"inputSchema"`
 }
 
@@ -79,7 +79,7 @@ type ToolCallParams struct {
 
 type ToolCallResult struct {
 	Content []ContentBlock `json:"content"`
-	IsError bool          `json:"isError,omitempty"`
+	IsError bool           `json:"isError,omitempty"`
 }
 
 type ContentBlock struct {

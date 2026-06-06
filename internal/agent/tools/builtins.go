@@ -19,5 +19,7 @@ func AllTools() []agent.Tool {
 		NewHTTPRequestTool(),
 		NewWebFetchTool(),
 		NewSubAgentTool(),
+		NewTodoWriteTool(),
+		NewAskUserTool(),
 	}
 }

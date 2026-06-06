@@ -28,12 +28,12 @@ type Error struct {
 
 // ServerCapabilities
 type ServerCapabilities struct {
-	TextDocumentSync   interface{}            `json:"textDocumentSync,omitempty"`
-	CompletionProvider *CompletionProvider     `json:"completionProvider,omitempty"`
-	HoverProvider      bool                   `json:"hoverProvider,omitempty"`
-	DefinitionProvider bool                   `json:"definitionProvider,omitempty"`
-	ReferencesProvider bool                   `json:"referencesProvider,omitempty"`
-	DocumentSymbolProvider bool               `json:"documentSymbolProvider,omitempty"`
+	TextDocumentSync       interface{}         `json:"textDocumentSync,omitempty"`
+	CompletionProvider     *CompletionProvider `json:"completionProvider,omitempty"`
+	HoverProvider          bool                `json:"hoverProvider,omitempty"`
+	DefinitionProvider     bool                `json:"definitionProvider,omitempty"`
+	ReferencesProvider     bool                `json:"referencesProvider,omitempty"`
+	DocumentSymbolProvider bool                `json:"documentSymbolProvider,omitempty"`
 }
 
 type CompletionProvider struct {
@@ -42,8 +42,8 @@ type CompletionProvider struct {
 
 // Initialize
 type InitializeParams struct {
-	ProcessID int    `json:"processId"`
-	RootURI   string `json:"rootUri"`
+	ProcessID    int                `json:"processId"`
+	RootURI      string             `json:"rootUri"`
 	Capabilities ClientCapabilities `json:"capabilities"`
 }
 
@@ -118,14 +118,14 @@ type CompletionList struct {
 }
 
 type CompletionItem struct {
-	Label         string      `json:"label"`
-	Kind          int         `json:"kind,omitempty"`
-	Detail        string      `json:"detail,omitempty"`
-	Documentation string      `json:"documentation,omitempty"`
-	InsertText    string      `json:"insertText,omitempty"`
-	InsertTextFormat int      `json:"insertTextFormat,omitempty"`
-	TextEdit      *TextEdit   `json:"textEdit,omitempty"`
-	SortText      string      `json:"sortText,omitempty"`
+	Label            string    `json:"label"`
+	Kind             int       `json:"kind,omitempty"`
+	Detail           string    `json:"detail,omitempty"`
+	Documentation    string    `json:"documentation,omitempty"`
+	InsertText       string    `json:"insertText,omitempty"`
+	InsertTextFormat int       `json:"insertTextFormat,omitempty"`
+	TextEdit         *TextEdit `json:"textEdit,omitempty"`
+	SortText         string    `json:"sortText,omitempty"`
 }
 
 type TextEdit struct {
@@ -158,6 +158,40 @@ type DefinitionParams struct {
 type Location struct {
 	URI   string `json:"uri"`
 	Range Range  `json:"range"`
+}
+
+// References
+type ReferenceParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+	Context      ReferenceContext       `json:"context"`
+}
+
+type ReferenceContext struct {
+	IncludeDeclaration bool `json:"includeDeclaration"`
+}
+
+// Code Actions
+type CodeActionParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Range        Range                  `json:"range"`
+	Context      CodeActionContext      `json:"context"`
+}
+
+type CodeActionContext struct {
+	Diagnostics []Diagnostic `json:"diagnostics"`
+	Only        []string     `json:"only,omitempty"`
+}
+
+type CodeAction struct {
+	Title   string         `json:"title"`
+	Kind    string         `json:"kind,omitempty"`
+	Edit    *WorkspaceEdit `json:"edit,omitempty"`
+	Command interface{}    `json:"command,omitempty"`
+}
+
+type WorkspaceEdit struct {
+	Changes map[string][]TextEdit `json:"changes,omitempty"`
 }
 
 // Position/Range
@@ -201,6 +235,31 @@ type FrontendCompletion struct {
 	InsertText string `json:"insertText"`
 	Kind       int    `json:"kind"`
 	Detail     string `json:"detail"`
+}
+
+// FrontendLocation is a frontend-friendly location with file path
+type FrontendLocation struct {
+	FilePath string `json:"filePath"`
+	Line     int    `json:"line"`
+	Col      int    `json:"col"`
+	EndLine  int    `json:"endLine"`
+	EndCol   int    `json:"endCol"`
+}
+
+// FrontendCodeAction is a frontend-friendly code action
+type FrontendCodeAction struct {
+	Title string                        `json:"title"`
+	Kind  string                        `json:"kind,omitempty"`
+	Edit  map[string][]FrontendTextEdit `json:"edit,omitempty"`
+}
+
+// FrontendTextEdit is a frontend-friendly text edit
+type FrontendTextEdit struct {
+	NewText   string `json:"newText"`
+	StartLine int    `json:"startLine"`
+	StartCol  int    `json:"startCol"`
+	EndLine   int    `json:"endLine"`
+	EndCol    int    `json:"endCol"`
 }
 
 func SeverityString(severity int) string {

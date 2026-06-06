@@ -1,6 +1,6 @@
 <script>
 import { onMount } from 'svelte'
-import { tokenStats, isLoadingStats, loadTokenUsage, clearTokenUsage } from '../stores/tokenUsage.js'
+import { tokenStats, isLoadingStats, loadTokenUsage, clearTokenUsage, statsError } from '../stores/tokenUsage.js'
 
 let selectedPeriod = 'month'
 let clearing = false
@@ -40,7 +40,7 @@ async function handleClear() {
   {#if $isLoadingStats}
     <div class="text-center py-4 text-sm" style="color: var(--text-secondary, var(--text-secondary));">加载中...</div>
   {:else if $tokenStats}
-    <div class="grid grid-cols-3 gap-3">
+    <div class="grid grid-cols-2 gap-3">
       <div class="p-3 rounded" style="background-color: var(--bg-secondary, var(--bg-secondary)); border: 1px solid var(--border, var(--border));">
         <div class="text-xs" style="color: var(--text-secondary, var(--text-secondary));">输入 Token</div>
         <div class="text-lg font-medium" style="color: var(--info, #4fc1ff);">{($tokenStats.totalTokensIn || 0).toLocaleString()}</div>
@@ -48,10 +48,6 @@ async function handleClear() {
       <div class="p-3 rounded" style="background-color: var(--bg-secondary, var(--bg-secondary)); border: 1px solid var(--border, var(--border));">
         <div class="text-xs" style="color: var(--text-secondary, var(--text-secondary));">输出 Token</div>
         <div class="text-lg font-medium" style="color: var(--ai-color, #4ec9b0);">{($tokenStats.totalTokensOut || 0).toLocaleString()}</div>
-      </div>
-      <div class="p-3 rounded" style="background-color: var(--bg-secondary, var(--bg-secondary)); border: 1px solid var(--border, var(--border));">
-        <div class="text-xs" style="color: var(--text-secondary, var(--text-secondary));">估算费用</div>
-        <div class="text-lg font-medium" style="color: var(--warning, #e5c07b);">${($tokenStats.totalCost || 0).toFixed(2)}</div>
       </div>
     </div>
 
@@ -63,11 +59,12 @@ async function handleClear() {
             <span class="text-sm flex-1" style="color: var(--text-primary, var(--text-primary));">{provider}</span>
             <span class="text-xs" style="color: var(--info, #4fc1ff);">{(usage.tokensIn || 0).toLocaleString()} in</span>
             <span class="text-xs" style="color: var(--ai-color, #4ec9b0);">{(usage.tokensOut || 0).toLocaleString()} out</span>
-            <span class="text-xs" style="color: var(--warning, #e5c07b);">${(usage.cost || 0).toFixed(2)}</span>
           </div>
         {/each}
       </div>
     {/if}
+  {:else if $statsError}
+    <div class="text-center py-4 text-sm" style="color: var(--error, #d73a49);">{$statsError}</div>
   {:else}
     <div class="text-center py-4 text-sm" style="color: var(--text-secondary, var(--text-secondary));">暂无用量数据</div>
   {/if}

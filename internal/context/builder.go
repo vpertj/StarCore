@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"StarCore/internal/memory"
@@ -17,17 +18,29 @@ import (
 const (
 	maxContextFileSize = 50000
 	maxAnalysisChars   = 5000
+	structureCacheTTL  = 30 * time.Second
 )
+
+type structureCacheEntry struct {
+	content  string
+	cachedAt time.Time
+}
 
 // Builder builds context messages for AI chat requests and manages compression.
 type Builder struct {
-	providerMgr *provider.Manager
-	memoryStore *memory.Store
+	providerMgr    *provider.Manager
+	memoryStore    *memory.Store
+	structureMu    sync.RWMutex
+	structureCache map[string]structureCacheEntry
 }
 
 // NewBuilder creates a new context builder.
 func NewBuilder(providerMgr *provider.Manager, memoryStore *memory.Store) *Builder {
-	return &Builder{providerMgr: providerMgr, memoryStore: memoryStore}
+	return &Builder{
+		providerMgr:    providerMgr,
+		memoryStore:    memoryStore,
+		structureCache: make(map[string]structureCacheEntry),
+	}
 }
 
 // BuildContextMessage constructs a context message from the chat request.
@@ -51,7 +64,7 @@ func (b *Builder) BuildContextMessage(req provider.ChatRequest) string {
 			}
 			content := string(data)
 			if len(content) > maxContextFileSize {
-				content = content[:maxContextFileSize] + "\n... [truncated]"
+				content = smartTruncate(content, maxContextFileSize)
 			}
 			fileParts = append(fileParts, fmt.Sprintf("--- File: %s ---\n%s", fp, content))
 		}
@@ -63,7 +76,7 @@ func (b *Builder) BuildContextMessage(req provider.ChatRequest) string {
 	if req.ActiveFile != "" && req.ActiveFileContent != "" {
 		content := req.ActiveFileContent
 		if len(content) > maxContextFileSize {
-			content = content[:maxContextFileSize] + "\n... [truncated]"
+			content = smartTruncate(content, maxContextFileSize)
 		}
 		parts = append(parts, "[Currently Open File]\nFile: "+req.ActiveFile+"\n\n"+content)
 	}
@@ -76,11 +89,34 @@ func (b *Builder) BuildContextMessage(req provider.ChatRequest) string {
 		parts = append(parts, "[Context Code]\n"+req.ContextCode)
 	}
 
+	// Inject project rules (.starcorerules, .cursorrules, CLAUDE.md) — like Cursor/Claude Code
+	if req.ProjectPath != "" {
+		rules := loadProjectRules(req.ProjectPath)
+		if rules != "" {
+			parts = append(parts, "[Project Rules]\nThe following project-specific rules apply. Follow these above all other instructions:\n\n"+rules)
+		}
+	}
+
+	// Auto-inject knowledge base entries for the project
+	if req.ProjectPath != "" && b.memoryStore != nil {
+		lastUserMsg := ""
+		for i := len(req.Messages) - 1; i >= 0; i-- {
+			if req.Messages[i].Role == "user" {
+				lastUserMsg = req.Messages[i].Content
+				break
+			}
+		}
+		knowledge := b.injectKnowledge(req.ProjectPath, lastUserMsg)
+		if knowledge != "" {
+			parts = append(parts, knowledge)
+		}
+	}
+
 	if len(parts) == 0 {
 		return ""
 	}
 
-	return strings.Join(parts, "\n\n") + "\n\n[End of context. Please use the above information to answer the user's question.]"
+	return strings.Join(parts, "\n\n") + "\n\n[End of context. Use the above information to handle the user's request below.]"
 }
 
 // GetModelContextWindow estimates the context window size for a model.
@@ -132,7 +168,7 @@ func (b *Builder) AnalyzeProject(projectPath string) (string, error) {
 	}
 
 	resp, err := b.providerMgr.Chat(context.Background(), provider.ChatRequest{
-		Messages: messages,
+		Messages:  messages,
 		MaxTokens: 2000,
 	})
 	if err != nil {
@@ -174,6 +210,27 @@ func (b *Builder) GetProjectAnalysis(projectPath string) (string, error) {
 // --- unexported helpers ---
 
 func (b *Builder) getProjectStructure(projectPath string) string {
+	if b.structureCache != nil {
+		b.structureMu.RLock()
+		if entry, ok := b.structureCache[projectPath]; ok && time.Since(entry.cachedAt) < structureCacheTTL {
+			b.structureMu.RUnlock()
+			return entry.content
+		}
+		b.structureMu.RUnlock()
+	}
+
+	content := b.scanProjectStructure(projectPath)
+
+	if b.structureCache != nil {
+		b.structureMu.Lock()
+		b.structureCache[projectPath] = structureCacheEntry{content: content, cachedAt: time.Now()}
+		b.structureMu.Unlock()
+	}
+
+	return content
+}
+
+func (b *Builder) scanProjectStructure(projectPath string) string {
 	files, err := ioutil.ReadDir(projectPath)
 	if err != nil {
 		return ""
@@ -220,19 +277,39 @@ func (b *Builder) getProjectStructure(projectPath string) string {
 }
 
 func estimateTokens(text string) int {
+	if len(text) == 0 {
+		return 0
+	}
 	cjk := 0
-	other := 0
+	asciiWords := 0
+	inWord := false
 	for _, r := range text {
 		if r >= 0x4E00 && r <= 0x9FFF || r >= 0x3400 && r <= 0x4DBF ||
 			r >= 0x3000 && r <= 0x303F || r >= 0xFF00 && r <= 0xFFEF ||
 			r >= 0x3040 && r <= 0x309F || r >= 0x30A0 && r <= 0x30FF ||
 			r >= 0xAC00 && r <= 0xD7AF {
 			cjk++
+			inWord = false
+		} else if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			if !inWord {
+				asciiWords++
+				inWord = true
+			}
 		} else {
-			other++
+			inWord = false
 		}
 	}
-	return int(float64(cjk)*1.5 + float64(other)*0.25)
+	nonWordChars := 0
+	for _, r := range text {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_') &&
+			!(r >= 0x4E00 && r <= 0x9FFF || r >= 0x3400 && r <= 0x4DBF ||
+				r >= 0x3000 && r <= 0x303F || r >= 0xFF00 && r <= 0xFFEF ||
+				r >= 0x3040 && r <= 0x309F || r >= 0x30A0 && r <= 0x30FF ||
+				r >= 0xAC00 && r <= 0xD7AF) {
+			nonWordChars++
+		}
+	}
+	return int(float64(cjk)*1.5+float64(asciiWords)*1.3+float64(nonWordChars)*0.4) + 1
 }
 
 func (b *Builder) summarizeAndCompress(messages []provider.Message, maxTokens int, providerID string) []provider.Message {
@@ -254,29 +331,43 @@ func (b *Builder) summarizeAndCompress(messages []provider.Message, maxTokens in
 		}
 	}
 
-	keepCount := 8
+	systemTokens := 0
+	for _, m := range systemMsgs {
+		systemTokens += estimateTokens(m.Content)
+	}
 
-	if len(otherMsgs) < 10 {
-		start := 0
-		if len(otherMsgs) > keepCount {
-			start = len(otherMsgs) - keepCount
+	availableForChat := maxTokens - systemTokens
+	if availableForChat < 2000 {
+		availableForChat = 2000
+	}
+
+	// Token budget: 60% recent messages, 40% summary of older messages
+	recentBudget := int(float64(availableForChat) * 0.6)
+	summaryBudget := availableForChat - recentBudget
+
+	// Calculate how many recent messages fit within recentBudget
+	recentStart := len(otherMsgs)
+	recentTokens := 0
+	for i := len(otherMsgs) - 1; i >= 0; i-- {
+		msgTokens := estimateTokens(otherMsgs[i].Content)
+		if recentTokens+msgTokens > recentBudget {
+			break
 		}
-		result := make([]provider.Message, 0, len(systemMsgs)+len(otherMsgs)-start)
-		result = append(result, systemMsgs...)
-		result = append(result, otherMsgs[start:]...)
-		return result
+		recentTokens += msgTokens
+		recentStart = i
 	}
-	if len(otherMsgs) <= keepCount {
-		result := make([]provider.Message, 0, len(systemMsgs)+keepCount)
+
+	if recentStart <= 0 {
+		result := make([]provider.Message, 0, len(systemMsgs)+len(otherMsgs))
 		result = append(result, systemMsgs...)
-		result = append(result, otherMsgs[len(otherMsgs)-keepCount/2:]...)
+		result = append(result, otherMsgs...)
 		return result
 	}
 
-	oldMsgs := otherMsgs[:len(otherMsgs)-keepCount]
-	recentMsgs := otherMsgs[len(otherMsgs)-keepCount:]
+	oldMsgs := otherMsgs[:recentStart]
+	recentMsgs := otherMsgs[recentStart:]
 
-	summary := b.generateSummary(oldMsgs, providerID)
+	summary := b.generateSummaryWithBudget(oldMsgs, providerID, summaryBudget)
 
 	result := make([]provider.Message, 0, len(systemMsgs)+len(recentMsgs)+1)
 	result = append(result, systemMsgs...)
@@ -298,15 +389,27 @@ func (b *Builder) summarizeAndCompress(messages []provider.Message, maxTokens in
 }
 
 func (b *Builder) generateSummary(messages []provider.Message, providerID string) string {
+	return b.generateSummaryWithBudget(messages, providerID, 3000)
+}
+
+func (b *Builder) generateSummaryWithBudget(messages []provider.Message, providerID string, maxSummaryTokens int) string {
 	if len(messages) == 0 || providerID == "" {
 		return ""
 	}
 
+	if maxSummaryTokens < 500 {
+		maxSummaryTokens = 500
+	}
+
 	var conversation strings.Builder
+	maxContentLen := 2000
+	if maxSummaryTokens < 1500 {
+		maxContentLen = 800
+	}
 	for i, msg := range messages {
 		content := msg.Content
-		if len(content) > 2000 {
-			content = content[:2000] + "..."
+		if len(content) > maxContentLen {
+			content = content[:maxContentLen] + "..."
 		}
 		conversation.WriteString(fmt.Sprintf("[%s #%d]: %s\n", msg.Role, i+1, content))
 	}
@@ -319,10 +422,10 @@ func (b *Builder) generateSummary(messages []provider.Message, providerID string
 5. 讨论过的重要文件路径和代码模式
 6. 任何约束条件或特别注意事项
 
-简洁但完整。此摘要将替换原始消息。
+简洁但完整。此摘要将替换原始消息。目标token数约%d。
 
 对话内容：
-%s`, conversation.String())
+%s`, maxSummaryTokens, conversation.String())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -331,7 +434,7 @@ func (b *Builder) generateSummary(messages []provider.Message, providerID string
 		ProviderID:  providerID,
 		Messages:    []provider.Message{{Role: "user", Content: prompt}},
 		Temperature: 0.1,
-		MaxTokens:   3000,
+		MaxTokens:   maxSummaryTokens,
 		Stream:      false,
 	})
 
@@ -341,6 +444,82 @@ func (b *Builder) generateSummary(messages []provider.Message, providerID string
 	}
 
 	return resp.Content
+}
+
+// injectKnowledge retrieves relevant knowledge entries and formats them for context injection.
+// It uses the user's message as a hint to select the most relevant entries.
+func (b *Builder) injectKnowledge(projectPath, userMessage string) string {
+	entries, err := b.memoryStore.GetKnowledge(projectPath)
+	if err != nil || len(entries) == 0 {
+		return ""
+	}
+
+	maxKnowledgeEntries := 5
+	maxKnowledgeChars := 4000
+
+	var selected []memory.Knowledge
+	keywords := extractKeywords(userMessage)
+
+	for _, entry := range entries {
+		if len(selected) >= maxKnowledgeEntries {
+			break
+		}
+		if entry.Category == "analysis" || entry.Category == "preference" || entry.Category == "pattern" {
+			selected = append(selected, entry)
+			continue
+		}
+		if len(keywords) > 0 && containsAnyKeyword(entry.Value, keywords) {
+			selected = append(selected, entry)
+		}
+	}
+
+	if len(selected) == 0 {
+		return ""
+	}
+
+	var buf strings.Builder
+	buf.WriteString("[Knowledge Base]\nThe following knowledge entries from previous sessions are relevant:\n\n")
+	totalChars := 0
+	for _, entry := range selected {
+		value := entry.Value
+		if len(value) > 1500 {
+			value = value[:1500] + "..."
+		}
+		if totalChars+len(value) > maxKnowledgeChars {
+			break
+		}
+		buf.WriteString(fmt.Sprintf("--- [%s] %s (source: %s, updated: %s) ---\n%s\n\n",
+			entry.Category, entry.Key, entry.Source, entry.UpdatedAt, value))
+		totalChars += len(value)
+	}
+	return buf.String()
+}
+
+func extractKeywords(text string) []string {
+	if len(text) == 0 {
+		return nil
+	}
+	words := strings.Fields(strings.ToLower(text))
+	keywords := make([]string, 0, len(words))
+	for _, w := range words {
+		if len(w) >= 3 {
+			keywords = append(keywords, w)
+		}
+	}
+	if len(keywords) > 10 {
+		keywords = keywords[:10]
+	}
+	return keywords
+}
+
+func containsAnyKeyword(text string, keywords []string) bool {
+	lower := strings.ToLower(text)
+	for _, kw := range keywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
 }
 
 // loadProjectRules reads a .starcorerules file from the project root.
@@ -417,4 +596,32 @@ func detectKeyFiles(projectPath string) []string {
 	}
 
 	return found
+}
+
+// smartTruncate keeps the head (imports/declarations) and tail (closing code) of a file.
+// For code files, this preserves structure better than naive truncation.
+func smartTruncate(content string, maxLen int) string {
+	if len(content) <= maxLen {
+		return content
+	}
+
+	headRatio := 0.75
+	tailRatio := 0.25
+	headLen := int(float64(maxLen) * headRatio)
+	tailLen := int(float64(maxLen) * tailRatio)
+
+	head := content[:headLen]
+	tail := content[len(content)-tailLen:]
+
+	// Find a clean line boundary for head
+	if idx := strings.LastIndex(head, "\n"); idx > headLen/2 {
+		head = head[:idx+1]
+	}
+	// Find a clean line boundary for tail
+	if idx := strings.Index(tail, "\n"); idx >= 0 {
+		tail = tail[idx+1:]
+	}
+
+	omittedLines := strings.Count(content, "\n") - strings.Count(head, "\n") - strings.Count(tail, "\n")
+	return head + fmt.Sprintf("\n... [omitted %d lines] ...\n", omittedLines) + tail
 }

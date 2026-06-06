@@ -42,6 +42,16 @@ func (p *AnthropicProvider) timeout() time.Duration {
 	return 120 * time.Second
 }
 
+type anthropicContent struct {
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	Content   json.RawMessage `json:"content,omitempty"`
+}
+
 type anthropicRequest struct {
 	Model       string             `json:"model"`
 	MaxTokens   int                `json:"max_tokens"`
@@ -49,19 +59,23 @@ type anthropicRequest struct {
 	System      string             `json:"system,omitempty"`
 	Temperature float64            `json:"temperature,omitempty"`
 	Stream      bool               `json:"stream,omitempty"`
+	Tools       []anthropicTool    `json:"tools,omitempty"`
+}
+
+type anthropicTool struct {
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	InputSchema interface{} `json:"input_schema"`
 }
 
 type anthropicMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string             `json:"role"`
+	Content []anthropicContent `json:"content"`
 }
 
 type anthropicResponse struct {
-	Content []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	} `json:"content"`
-	StopReason string `json:"stop_reason"`
+	Content    []anthropicContent `json:"content"`
+	StopReason string             `json:"stop_reason"`
 	Error      *struct {
 		Message string `json:"message"`
 		Type    string `json:"type"`
@@ -71,9 +85,15 @@ type anthropicResponse struct {
 type anthropicStreamEvent struct {
 	Type  string `json:"type"`
 	Delta *struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
+		Type        string `json:"type"`
+		Text        string `json:"text"`
+		PartialJSON string `json:"partial_json,omitempty"`
 	} `json:"delta"`
+	ContentBlock *struct {
+		Type string `json:"type"`
+		ID   string `json:"id,omitempty"`
+		Name string `json:"name,omitempty"`
+	} `json:"content_block"`
 	Message *anthropicResponse `json:"message"`
 	Error   *struct {
 		Message string `json:"message"`
@@ -89,15 +109,52 @@ func convertToAnthropicMessages(messages []Message) (string, []anthropicMessage)
 			systemPrompt = msg.Content
 			continue
 		}
-		role := msg.Role
-		if role == "assistant" {
+		role := "user"
+		var content []anthropicContent
+
+		switch msg.Role {
+		case "assistant":
 			role = "assistant"
-		} else {
+			if len(msg.ToolCalls) > 0 {
+				for _, tc := range msg.ToolCalls {
+					if msg.Content != "" {
+						content = append(content, anthropicContent{Type: "text", Text: msg.Content})
+					}
+					content = append(content, anthropicContent{
+						Type:  "tool_use",
+						ID:    tc.ID,
+						Name:  tc.Function.Name,
+						Input: json.RawMessage(tc.Function.Arguments),
+					})
+				}
+			} else {
+				content = append(content, anthropicContent{Type: "text", Text: msg.Content})
+			}
+		case "tool":
 			role = "user"
+			content = append(content, anthropicContent{
+				Type:      "tool_result",
+				ToolUseID: msg.ToolCallID,
+				Content:   json.RawMessage(fmt.Sprintf("%q", msg.Content)),
+			})
+		default:
+			content = append(content, anthropicContent{Type: "text", Text: msg.Content})
 		}
-		result = append(result, anthropicMessage{Role: role, Content: msg.Content})
+		result = append(result, anthropicMessage{Role: role, Content: content})
 	}
 	return systemPrompt, result
+}
+
+func convertAnthropicTools(tools []ToolDefinition) []anthropicTool {
+	result := make([]anthropicTool, 0, len(tools))
+	for _, t := range tools {
+		result = append(result, anthropicTool{
+			Name:        t.Function.Name,
+			Description: t.Function.Description,
+			InputSchema: t.Function.Parameters,
+		})
+	}
+	return result
 }
 
 func (p *AnthropicProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
@@ -121,6 +178,7 @@ func (p *AnthropicProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRes
 		System:      systemPrompt,
 		Temperature: req.Temperature,
 		Stream:      false,
+		Tools:       convertAnthropicTools(req.Tools),
 	}
 
 	jsonBody, err := json.Marshal(body)
@@ -142,7 +200,7 @@ func (p *AnthropicProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRes
 	httpReq.Header.Set("x-api-key", p.config.APIKey)
 	httpReq.Header.Set("anthropic-version", anthroVersion)
 
-	client := &http.Client{Timeout: p.timeout()}
+	client := NewHTTPClient(p.timeout())
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
@@ -201,6 +259,7 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ChatRequest) (<-
 		System:      systemPrompt,
 		Temperature: req.Temperature,
 		Stream:      true,
+		Tools:       convertAnthropicTools(req.Tools),
 	}
 
 	jsonBody, err := json.Marshal(body)
@@ -225,7 +284,7 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ChatRequest) (<-
 	httpReq.Header.Set("anthropic-version", anthroVersion)
 	httpReq.Header.Set("Accept", "text/event-stream")
 
-	client := &http.Client{Timeout: 0}
+	client := NewHTTPClient(0)
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		close(ch)
@@ -241,6 +300,10 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ChatRequest) (<-
 			ch <- StreamEvent{Type: "error", Content: fmt.Sprintf("API returned status %d: %s", resp.StatusCode, string(respBody))}
 			return
 		}
+
+		var currentToolID string
+		var currentToolName string
+		var currentToolArgs strings.Builder
 
 		reader := bufio.NewReader(resp.Body)
 		for {
@@ -273,11 +336,39 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ChatRequest) (<-
 			}
 
 			switch event.Type {
-			case "content_block_delta":
-				if event.Delta != nil && event.Delta.Text != "" {
-					ch <- StreamEvent{Type: "data", Content: event.Delta.Text}
+			case "content_block_start":
+				if event.ContentBlock != nil && event.ContentBlock.Type == "tool_use" {
+					currentToolID = event.ContentBlock.ID
+					currentToolName = event.ContentBlock.Name
+					currentToolArgs.Reset()
 				}
+			case "content_block_delta":
+				if event.Delta != nil {
+					if event.Delta.Type == "text" && event.Delta.Text != "" {
+						ch <- StreamEvent{Type: "data", Content: event.Delta.Text}
+					} else if event.Delta.Type == "input_json_delta" && event.Delta.PartialJSON != "" {
+						currentToolArgs.WriteString(event.Delta.PartialJSON)
+					}
+				}
+			case "message_delta":
+				// usage info, stop reason
 			case "message_stop":
+				// Flush any pending tool call
+				if currentToolID != "" && currentToolName != "" {
+					ch <- StreamEvent{
+						Type: "tool_call",
+						Name: currentToolName,
+						Args: currentToolArgs.String(),
+						ToolCalls: []ToolCall{{
+							ID:   currentToolID,
+							Type: "function",
+							Function: ToolCallFunc{
+								Name:      currentToolName,
+								Arguments: currentToolArgs.String(),
+							},
+						}},
+					}
+				}
 				ch <- StreamEvent{Type: "done"}
 				return
 			}
@@ -319,7 +410,7 @@ func (p *AnthropicProvider) ListModels(ctx context.Context) ([]Model, error) {
 	httpReq.Header.Set("x-api-key", p.config.APIKey)
 	httpReq.Header.Set("anthropic-version", anthroVersion)
 
-	client := &http.Client{Timeout: p.timeout() / 4}
+	client := NewHTTPClient(p.timeout() / 4)
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return []Model{}, nil
@@ -346,12 +437,14 @@ func (p *AnthropicProvider) ListModels(ctx context.Context) ([]Model, error) {
 
 	models := make([]Model, 0, len(result.Data))
 	for _, m := range result.Data {
+		cw := EstimateContextWindow(m.ID)
 		models = append(models, Model{
-			ID:           m.ID,
-			Name:         m.ID,
-			ProviderID:   "anthropic",
-			MaxTokens:    200000,
-			SupportsTool: true,
+			ID:            m.ID,
+			Name:          m.ID,
+			ProviderID:    "anthropic",
+			MaxTokens:     200000,
+			ContextWindow: cw,
+			SupportsTool:  true,
 		})
 	}
 	return models, nil
@@ -374,7 +467,7 @@ func (p *AnthropicProvider) Validate(ctx context.Context) error {
 	}
 	req.Header.Set("x-api-key", p.config.APIKey)
 	req.Header.Set("anthropic-version", anthroVersion)
-	client := &http.Client{Timeout: p.timeout() / 12}
+	client := NewHTTPClient(p.timeout() / 12)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("connection failed: %w", err)

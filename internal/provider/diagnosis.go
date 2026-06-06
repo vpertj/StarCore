@@ -26,7 +26,7 @@ func DiagnoseError(err error) ErrorDiagnosis {
 		return ErrorDiagnosis{
 			Type: "auth", Title: "API密钥无效",
 			Message: "AI提供商认证失败，请检查API密钥配置。",
-			Action: "settings", ActionLabel: "前往设置", Retryable: false,
+			Action:  "settings", ActionLabel: "前往设置", Retryable: false,
 		}
 	}
 
@@ -34,7 +34,7 @@ func DiagnoseError(err error) ErrorDiagnosis {
 		return ErrorDiagnosis{
 			Type: "rate_limit", Title: "请求频率限制",
 			Message: "AI服务请求过于频繁，请稍后重试。",
-			Action: "retry", ActionLabel: "稍后重试", Retryable: true,
+			Action:  "retry", ActionLabel: "稍后重试", Retryable: true,
 		}
 	}
 
@@ -42,7 +42,7 @@ func DiagnoseError(err error) ErrorDiagnosis {
 		return ErrorDiagnosis{
 			Type: "context", Title: "对话上下文超限",
 			Message: "对话过长超出模型限制，建议开始新对话。",
-			Action: "new_chat", ActionLabel: "开始新对话", Retryable: false,
+			Action:  "new_chat", ActionLabel: "开始新对话", Retryable: false,
 		}
 	}
 
@@ -52,7 +52,7 @@ func DiagnoseError(err error) ErrorDiagnosis {
 		return ErrorDiagnosis{
 			Type: "service", Title: "AI服务暂时不可用",
 			Message: "AI提供商服务异常，请稍后重试或切换提供商。",
-			Action: "retry", ActionLabel: "重试", Retryable: true,
+			Action:  "retry", ActionLabel: "重试", Retryable: true,
 		}
 	}
 
@@ -62,14 +62,14 @@ func DiagnoseError(err error) ErrorDiagnosis {
 		return ErrorDiagnosis{
 			Type: "network", Title: "网络连接失败",
 			Message: "无法连接到AI服务，请检查网络设置。",
-			Action: "retry", ActionLabel: "重试", Retryable: true,
+			Action:  "retry", ActionLabel: "重试", Retryable: true,
 		}
 	}
 
 	return ErrorDiagnosis{
 		Type: "unknown", Title: "AI请求失败",
 		Message: fmt.Sprintf("错误: %s", truncate(msg, 200)),
-		Action: "retry", ActionLabel: "重试", Retryable: true,
+		Action:  "retry", ActionLabel: "重试", Retryable: true,
 	}
 }
 

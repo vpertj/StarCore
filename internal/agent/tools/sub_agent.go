@@ -9,20 +9,22 @@ import (
 	"time"
 
 	"StarCore/internal/agent"
+	"StarCore/internal/memory"
 	"StarCore/internal/provider"
 )
 
 // SubAgentToolExec is set by app.go to give the SubAgent tool access to the tool executor.
 var SubAgentToolExec *agent.ToolExecutor
 var SubAgentProviderMgr *provider.Manager
+var SubAgentMemoryStore *memory.Store
 var SubAgentCurrentProviderID string // set before each request by the caller
 
 type SubAgentTool struct{}
 
 func NewSubAgentTool() *SubAgentTool { return &SubAgentTool{} }
 
-func (t *SubAgentTool) ID() string            { return "sub_agent" }
-func (t *SubAgentTool) Name() string          { return "Sub Agent" }
+func (t *SubAgentTool) ID() string             { return "sub_agent" }
+func (t *SubAgentTool) Name() string           { return "Sub Agent" }
 func (t *SubAgentTool) RequiresApproval() bool { return false }
 
 func (t *SubAgentTool) Description() string {
@@ -61,15 +63,15 @@ func (t *SubAgentTool) Execute(ctx context.Context, args map[string]any) (string
 	}
 
 	providerID := SubAgentCurrentProviderID
-		if providerID == "" && SubAgentProviderMgr != nil {
-			dp := SubAgentProviderMgr.GetDefaultProvider()
-			if dp != nil {
-				providerID = dp.ID()
-			}
+	if providerID == "" && SubAgentProviderMgr != nil {
+		dp := SubAgentProviderMgr.GetDefaultProvider()
+		if dp != nil {
+			providerID = dp.ID()
 		}
-		if providerID == "" {
-			return "", fmt.Errorf("sub-agent: no provider configured")
-		}
+	}
+	if providerID == "" {
+		return "", fmt.Errorf("sub-agent: no provider configured")
+	}
 
 	req := provider.ChatRequest{
 		ProviderID: providerID,
@@ -131,6 +133,27 @@ func (t *SubAgentTool) Execute(ctx context.Context, args map[string]any) (string
 			}
 		}
 
+		// Record token usage for this sub-agent round
+		if SubAgentMemoryStore != nil {
+			tokensIn := 0
+			for _, msg := range currentReq.Messages {
+				tokensIn += estimateSubTokens(msg.Content)
+			}
+			tokensOut := estimateSubTokens(content)
+			if tokensIn > 0 || tokensOut > 0 {
+				go SubAgentMemoryStore.SaveTokenUsage(&memory.TokenUsageEntry{
+					ID:             fmt.Sprintf("sa_%d", time.Now().UnixNano()),
+					ConversationID: "",
+					ProviderID:     currentReq.ProviderID,
+					Model:          currentReq.Model,
+					TokensIn:       tokensIn,
+					TokensOut:      tokensOut,
+					Cost:           0,
+					CreatedAt:      time.Now().Format(time.RFC3339),
+				})
+			}
+		}
+
 		cancel() // done consuming events, release context
 
 		if !hasTools {
@@ -178,10 +201,26 @@ func (t *SubAgentTool) Execute(ctx context.Context, args map[string]any) (string
 
 	summary := strings.TrimSpace(result.String())
 	if summary == "" {
-		summary = "(子智能体未返回内容)"
+		summary = "(子智能体未产生有效输出)"
 	}
 	log.Printf("[SUB-AGENT] completed: %s", truncateStr(summary, 120))
-	return "🔍 子智能体报告:\n" + summary, nil
+	return "子智能体分析结果:\n" + summary, nil
+}
+
+func estimateSubTokens(text string) int {
+	cjk := 0
+	other := 0
+	for _, r := range text {
+		if r >= 0x4E00 && r <= 0x9FFF || r >= 0x3400 && r <= 0x4DBF ||
+			r >= 0x3000 && r <= 0x303F || r >= 0xFF00 && r <= 0xFFEF ||
+			r >= 0x3040 && r <= 0x309F || r >= 0x30A0 && r <= 0x30FF ||
+			r >= 0xAC00 && r <= 0xD7AF {
+			cjk++
+		} else {
+			other++
+		}
+	}
+	return int(float64(cjk)*1.5 + float64(other)*0.25)
 }
 
 func truncateStr(s string, maxLen int) string {
