@@ -3,7 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"strings"
 
 	"StarCore/internal/agent"
@@ -43,15 +43,21 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) (strin
 		return "", fmt.Errorf("content is required")
 	}
 
+	if SandboxConfig != nil {
+		if err := SandboxConfig.ValidatePath(path); err != nil {
+			return "", fmt.Errorf("path validation failed: %w", err)
+		}
+	}
+
 	// Read old content before overwriting (for diff)
-	oldData, readErr := ioutil.ReadFile(path)
+	oldData, readErr := os.ReadFile(path)
 	var oldContent string
 	existed := readErr == nil
 	if existed {
 		oldContent = string(oldData)
 	}
 
-	err := ioutil.WriteFile(path, []byte(content), 0644)
+	err := os.WriteFile(path, []byte(content), 0644)
 	if err != nil {
 		return "", err
 	}

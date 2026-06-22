@@ -5,6 +5,7 @@
     toggleSidebar,
     toggleAIPanel,
     toggleBottomPanel,
+    bottomPanelTab,
   } from "../stores/ui.js";
   import { setTheme } from "../stores/theme.js";
   import {
@@ -15,71 +16,54 @@
     openProjectFolder,
   } from "../stores/app.js";
   import { sendMessage } from "../stores/ai.js";
+  import { runTests } from "../stores/testRunner.js";
+  import { addWorkspaceRoot } from "../stores/workspace.js";
 
   const commands = [
     { id: "file.open-folder", label: "打开项目文件夹", category: "文件" },
-    {
-      id: "file.save",
-      label: "保存文件",
-      category: "文件",
-      shortcut: "Ctrl+S",
-    },
-    {
-      id: "view.toggle-sidebar",
-      label: "切换侧边栏",
-      category: "视图",
-      shortcut: "Ctrl+B",
-    },
-    {
-      id: "view.toggle-ai-panel",
-      label: "切换 AI 面板",
-      category: "视图",
-      shortcut: "Ctrl+Shift+A",
-    },
-    {
-      id: "view.toggle-terminal",
-      label: "切换终端",
-      category: "视图",
-      shortcut: "Ctrl+`",
-    },
+    { id: "file.save", label: "保存文件", category: "文件", shortcut: "Ctrl+S" },
+    { id: "file.new-file", label: "新建文件", category: "文件" },
+    { id: "file.find", label: "在文件中查找", category: "文件", shortcut: "Ctrl+Shift+F" },
+    { id: "file.replace", label: "在文件中替换", category: "文件", shortcut: "Ctrl+Shift+H" },
+    { id: "view.toggle-sidebar", label: "切换侧边栏", category: "视图", shortcut: "Ctrl+B" },
+    { id: "view.toggle-ai-panel", label: "切换 AI 面板", category: "视图", shortcut: "Ctrl+Shift+A" },
+    { id: "view.toggle-terminal", label: "切换终端", category: "视图", shortcut: "Ctrl+`" },
     { id: "view.toggle-bottom-panel", label: "切换底部面板", category: "视图" },
-    {
-      id: "ai.new-chat",
-      label: "新建 AI 对话",
-      category: "AI",
-      shortcut: "Ctrl+L",
-    },
-    {
-      id: "ai.agent-selector",
-      label: "切换 Agent",
-      category: "AI",
-      shortcut: "Ctrl+Shift+M",
-    },
-    {
-      id: "skill.generate-test",
-      label: "Skill: 生成单元测试",
-      category: "Skill",
-    },
+    { id: "view.split-editor", label: "分屏编辑", category: "视图", shortcut: "Ctrl+\\" },
+    { id: "view.close-split", label: "关闭分屏", category: "视图" },
+    { id: "view.problems", label: "显示问题面板", category: "视图" },
+    { id: "view.output", label: "显示输出面板", category: "视图" },
+    { id: "view.tests", label: "显示测试面板", category: "视图" },
+    { id: "ai.new-chat", label: "新建 AI 对话", category: "AI", shortcut: "Ctrl+L" },
+    { id: "ai.agent-selector", label: "切换 Agent", category: "AI", shortcut: "Ctrl+Shift+M" },
+    { id: "ai.explain", label: "AI: 解释代码", category: "AI" },
+    { id: "ai.fix-bug", label: "AI: 修复 Bug", category: "AI" },
+    { id: "ai.optimize", label: "AI: 优化代码", category: "AI" },
+    { id: "refactor.rename", label: "重命名符号", category: "重构", shortcut: "F2" },
+    { id: "refactor.extract-function", label: "提取函数", category: "重构" },
+    { id: "refactor.extract-variable", label: "提取变量", category: "重构" },
+    { id: "refactor.inline", label: "内联变量", category: "重构" },
+    { id: "editor.format", label: "格式化文档", category: "编辑器", shortcut: "Shift+Alt+F" },
+    { id: "editor.goto-definition", label: "跳转到定义", category: "编辑器", shortcut: "F12" },
+    { id: "editor.find-references", label: "查找引用", category: "编辑器", shortcut: "Shift+F12" },
+    { id: "editor.code-actions", label: "代码操作", category: "编辑器", shortcut: "Ctrl+." },
+    { id: "test.run-all", label: "运行全部测试", category: "测试" },
+    { id: "test.run-file", label: "运行当前文件测试", category: "测试" },
+    { id: "git.status", label: "Git: 查看状态", category: "Git" },
+    { id: "git.commit", label: "Git: 提交", category: "Git" },
+    { id: "git.push", label: "Git: 推送", category: "Git" },
+    { id: "git.pull", label: "Git: 拉取", category: "Git" },
+    { id: "git.blame", label: "Git: 查看Blame", category: "Git" },
+    { id: "workspace.add-folder", label: "添加文件夹到工作区", category: "工作区" },
+    { id: "skill.generate-test", label: "Skill: 生成单元测试", category: "Skill" },
     { id: "skill.code-review", label: "Skill: 代码审查", category: "Skill" },
     { id: "skill.refactor", label: "Skill: 重构建议", category: "Skill" },
     { id: "skill.generate-doc", label: "Skill: 生成文档", category: "Skill" },
     { id: "skill.explain-code", label: "Skill: 解释代码", category: "Skill" },
     { id: "skill.fix-bug", label: "Skill: 修复 Bug", category: "Skill" },
-    {
-      id: "skill.commit-message",
-      label: "Skill: 生成 Commit Message",
-      category: "Skill",
-    },
+    { id: "skill.commit-message", label: "Skill: 生成 Commit Message", category: "Skill" },
     { id: "skill.sql-optimize", label: "Skill: SQL 优化", category: "Skill" },
     { id: "settings.open", label: "打开设置", category: "偏好" },
-    { id: "editor.format", label: "格式化文档", category: "编辑器" },
-    {
-      id: "view.split-editor",
-      label: "分屏编辑",
-      category: "视图",
-      shortcut: "Ctrl+\\",
-    },
-    { id: "view.close-split", label: "关闭分屏", category: "视图" },
     { id: "theme.dark", label: "切换深色主题", category: "外观" },
     { id: "theme.light", label: "切换浅色主题", category: "外观" },
     { id: "theme.hc", label: "切换高对比度主题", category: "外观" },
@@ -155,6 +139,18 @@
       case "view.toggle-bottom-panel":
         toggleBottomPanel();
         break;
+      case "view.problems":
+        toggleBottomPanel();
+        bottomPanelTab.set("problems");
+        break;
+      case "view.output":
+        toggleBottomPanel();
+        bottomPanelTab.set("output");
+        break;
+      case "view.tests":
+        toggleBottomPanel();
+        bottomPanelTab.set("tests");
+        break;
       case "settings.open":
         settingsVisible.update((v) => !v);
         break;
@@ -169,6 +165,55 @@
         break;
       case "editor.format":
         sendMessage("/format code");
+        break;
+      case "ai.explain":
+        sendMessage("解释选中的代码");
+        break;
+      case "ai.fix-bug":
+        sendMessage("修复这个Bug");
+        break;
+      case "ai.optimize":
+        sendMessage("优化这段代码的性能");
+        break;
+      case "test.run-all":
+        runTests();
+        toggleBottomPanel();
+        bottomPanelTab.set("tests");
+        break;
+      case "test.run-file":
+        runTests("./...");
+        toggleBottomPanel();
+        bottomPanelTab.set("tests");
+        break;
+      case "refactor.rename":
+        document.dispatchEvent(new CustomEvent("refactor-rename"));
+        break;
+      case "refactor.extract-function":
+        document.dispatchEvent(new CustomEvent("refactor-extract-function"));
+        break;
+      case "refactor.inline":
+        document.dispatchEvent(new CustomEvent("refactor-inline"));
+        break;
+      case "editor.goto-definition":
+        document.dispatchEvent(new CustomEvent("goto-definition"));
+        break;
+      case "editor.find-references":
+        document.dispatchEvent(new CustomEvent("find-references"));
+        break;
+      case "git.status":
+        toggleSidebar();
+        break;
+      case "git.commit":
+        sendMessage("生成 commit message 并提交");
+        break;
+      case "git.push":
+        if (window.backend?.GitPush && $currentProject) window.backend.GitPush($currentProject);
+        break;
+      case "git.pull":
+        if (window.backend?.GitPull && $currentProject) window.backend.GitPull($currentProject);
+        break;
+      case "workspace.add-folder":
+        openProjectFolder().then(f => { if (f) addWorkspaceRoot(f); });
         break;
     }
   }
@@ -194,7 +239,7 @@
 {#if $commandPaletteOpen}
   <div
     class="dialog-backdrop justify-center"
-    style="padding-top: 15vh; align-items: flex-start;"
+    style="padding-top: 15vh; align-items: center;"
     transition:fade={{ duration: 100 }}
     onclick={(e) => {
       if (e.target === e.currentTarget) commandPaletteOpen.set(false);
@@ -241,7 +286,7 @@
             style="background-color: {i === selectedIndex
               ? 'var(--selection)'
               : 'transparent'}; color: {i === selectedIndex
-              ? '#ffffff'
+              ? 'var(--text-on-accent)'
               : 'var(--text-primary)'};"
             onclick={() => executeCommand(cmd)}
             onmouseenter={() => (selectedIndex = i)}

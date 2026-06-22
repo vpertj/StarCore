@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"StarCore/internal/agent"
@@ -17,7 +18,21 @@ import (
 var SubAgentToolExec *agent.ToolExecutor
 var SubAgentProviderMgr *provider.Manager
 var SubAgentMemoryStore *memory.Store
-var SubAgentCurrentProviderID string // set before each request by the caller
+
+var subAgentProviderMu sync.RWMutex
+var subAgentProviderID string
+
+func SetSubAgentProviderID(id string) {
+	subAgentProviderMu.Lock()
+	subAgentProviderID = id
+	subAgentProviderMu.Unlock()
+}
+
+func GetSubAgentProviderID() string {
+	subAgentProviderMu.RLock()
+	defer subAgentProviderMu.RUnlock()
+	return subAgentProviderID
+}
 
 type SubAgentTool struct{}
 
@@ -28,21 +43,61 @@ func (t *SubAgentTool) Name() string           { return "Sub Agent" }
 func (t *SubAgentTool) RequiresApproval() bool { return false }
 
 func (t *SubAgentTool) Description() string {
-	return "Spawn an independent read-only sub-agent to analyze a specific task with its own context window. The sub-agent can read files, search code, and list directories. Use this to delegate focused investigation work without polluting the main conversation context."
+	return "Spawn independent sub-agents to analyze or implement tasks. Supports parallel execution of multiple sub-agents, each with its own context window. Sub-agents can read files, search code, and (if mode=build) write files and execute commands. Use this to delegate focused work without polluting the main conversation context."
 }
 
 func (t *SubAgentTool) Parameters() agent.ToolParameters {
 	return agent.ToolParameters{
 		Type: "object",
 		Properties: map[string]agent.ToolParamProp{
-			"task":    {Type: "string", Description: "Detailed description of what to analyze/investigate"},
-			"context": {Type: "string", Description: "Optional: file paths, code snippets, or background info"},
+			"task":     {Type: "string", Description: "Description of what to analyze/implement. For parallel tasks, describe each task separated by '---'"},
+			"context":  {Type: "string", Description: "Optional: file paths, code snippets, or background info"},
+			"mode":     {Type: "string", Description: "Optional: 'analyze' (read-only, default) or 'build' (can write/execute)"},
+			"parallel": {Type: "boolean", Description: "Optional: set true to split task by '---' and run sub-agents in parallel"},
 		},
 		Required: []string{"task"},
 	}
 }
 
 const subAgentMaxLoops = 6
+
+var (
+	subAgentPoolMu    sync.Mutex
+	subAgentActive    int
+	subAgentMaxActive = 4
+)
+
+func canSpawnSubAgent() bool {
+	subAgentPoolMu.Lock()
+	defer subAgentPoolMu.Unlock()
+	return subAgentActive < subAgentMaxActive
+}
+
+func acquireSubAgentSlot() bool {
+	subAgentPoolMu.Lock()
+	defer subAgentPoolMu.Unlock()
+	if subAgentActive >= subAgentMaxActive {
+		return false
+	}
+	subAgentActive++
+	return true
+}
+
+func releaseSubAgentSlot() {
+	subAgentPoolMu.Lock()
+	defer subAgentPoolMu.Unlock()
+	if subAgentActive > 0 {
+		subAgentActive--
+	}
+}
+
+func SetSubAgentMaxConcurrency(n int) {
+	subAgentPoolMu.Lock()
+	defer subAgentPoolMu.Unlock()
+	if n > 0 {
+		subAgentMaxActive = n
+	}
+}
 
 func (t *SubAgentTool) Execute(ctx context.Context, args map[string]any) (string, error) {
 	if SubAgentProviderMgr == nil {
@@ -54,15 +109,13 @@ func (t *SubAgentTool) Execute(ctx context.Context, args map[string]any) (string
 		return "", fmt.Errorf("task description is required")
 	}
 	extContext, _ := args["context"].(string)
-
-	log.Printf("[SUB-AGENT] spawned: %s", truncateStr(task, 80))
-
-	prompt := task
-	if extContext != "" {
-		prompt += "\n\nContext:\n" + extContext
+	mode, _ := args["mode"].(string)
+	if mode == "" {
+		mode = "analyze"
 	}
+	parallel, _ := args["parallel"].(bool)
 
-	providerID := SubAgentCurrentProviderID
+	providerID := GetSubAgentProviderID()
 	if providerID == "" && SubAgentProviderMgr != nil {
 		dp := SubAgentProviderMgr.GetDefaultProvider()
 		if dp != nil {
@@ -73,23 +126,98 @@ func (t *SubAgentTool) Execute(ctx context.Context, args map[string]any) (string
 		return "", fmt.Errorf("sub-agent: no provider configured")
 	}
 
+	if parallel && strings.Contains(task, "---") {
+		tasks := strings.Split(task, "---")
+		type taskResult struct {
+			index  int
+			result string
+			err    error
+		}
+		ch := make(chan taskResult, len(tasks))
+		for i, t := range tasks {
+			t = strings.TrimSpace(t)
+			if t == "" {
+				continue
+			}
+			go func(idx int, taskDesc string) {
+				result, err := runSingleSubAgent(ctx, taskDesc, extContext, mode, providerID)
+				ch <- taskResult{index: idx, result: result, err: err}
+			}(i, t)
+		}
+
+		results := make([]string, len(tasks))
+		for i := 0; i < len(tasks); i++ {
+			if strings.TrimSpace(tasks[i]) == "" {
+				continue
+			}
+			tr := <-ch
+			if tr.err != nil {
+				results[tr.index] = fmt.Sprintf("(子智能体%d错误: %v)", tr.index+1, tr.err)
+			} else {
+				results[tr.index] = tr.result
+			}
+		}
+
+		var combined strings.Builder
+		combined.WriteString("并行子智能体执行结果:\n\n")
+		for i, r := range results {
+			if r == "" {
+				continue
+			}
+			combined.WriteString(fmt.Sprintf("### 子智能体 %d\n%s\n\n", i+1, r))
+		}
+		return combined.String(), nil
+	}
+
+	return runSingleSubAgent(ctx, task, extContext, mode, providerID)
+}
+
+func runSingleSubAgent(ctx context.Context, task string, extContext string, mode string, providerID string) (string, error) {
+	if !acquireSubAgentSlot() {
+		return "", fmt.Errorf("sub-agent: concurrency limit reached (%d active)", subAgentMaxActive)
+	}
+	defer releaseSubAgentSlot()
+
+	log.Printf("[SUB-AGENT] spawned (mode=%s): %s", mode, truncateStr(task, 80))
+
+	prompt := task
+	if extContext != "" {
+		prompt += "\n\nContext:\n" + extContext
+	}
+
+	var systemPrompt string
+	var tools []string
+
+	switch mode {
+	case "build":
+		systemPrompt = "You are a focused implementation sub-agent. You can read files, write files, edit files, search code, and execute commands. Implement the task precisely. After implementation, verify your changes work correctly. Be thorough and concise."
+		tools = []string{"read_file", "write_file", "edit_file", "glob_files", "search_files", "list_directory", "get_git_diff", "execute_command"}
+	default:
+		systemPrompt = "You are a focused analysis sub-agent. Use read_file, search_files, list_directory, get_git_diff to investigate. Be thorough. After analysis, write a clear summary with specific findings, file paths, and code. Do NOT write or modify any files. Be concise."
+		tools = []string{"read_file", "glob_files", "search_files", "list_directory", "get_git_diff"}
+	}
+
 	req := provider.ChatRequest{
 		ProviderID: providerID,
 		Messages: []provider.Message{
-			{Role: "system", Content: "You are a focused analysis sub-agent. Use read_file, search_files, list_directory, get_git_diff to investigate. Be thorough. After analysis, write a clear summary with specific findings, file paths, and code. Do NOT write or modify any files. Be concise."},
+			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: prompt},
 		},
 		Temperature: 0.2,
 		MaxTokens:   0,
 	}
 
-	allTools := []string{"read_file", "glob_files", "search_files", "list_directory", "get_git_diff"}
-	req.Tools = buildSubAgentToolDefs(allTools)
+	req.Tools = buildSubAgentToolDefs(tools)
 
 	var result strings.Builder
 	currentReq := req
 
-	for loop := 0; loop < subAgentMaxLoops; loop++ {
+	maxLoops := subAgentMaxLoops
+	if mode == "build" {
+		maxLoops = 15
+	}
+
+	for loop := 0; loop < maxLoops; loop++ {
 		roundCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 
 		eventCh, err := SubAgentProviderMgr.ChatStream(roundCtx, currentReq)
@@ -133,7 +261,6 @@ func (t *SubAgentTool) Execute(ctx context.Context, args map[string]any) (string
 			}
 		}
 
-		// Record token usage for this sub-agent round
 		if SubAgentMemoryStore != nil {
 			tokensIn := 0
 			for _, msg := range currentReq.Messages {
@@ -154,7 +281,7 @@ func (t *SubAgentTool) Execute(ctx context.Context, args map[string]any) (string
 			}
 		}
 
-		cancel() // done consuming events, release context
+		cancel()
 
 		if !hasTools {
 			result.WriteString(content)
@@ -187,8 +314,12 @@ func (t *SubAgentTool) Execute(ctx context.Context, args map[string]any) (string
 					if toolResult.Error != "" {
 						rc = "Error: " + toolResult.Error
 					}
-					if len(rc) > 5000 {
-						rc = rc[:5000] + "..."
+					maxChars := 5000
+					if mode == "build" {
+						maxChars = 8000
+					}
+					if len(rc) > maxChars {
+						rc = rc[:maxChars] + "..."
 					}
 					currentReq.Messages = append(currentReq.Messages, provider.Message{
 						Role: "tool", Content: rc, ToolCallID: tc.ID, Name: tc.Function.Name,

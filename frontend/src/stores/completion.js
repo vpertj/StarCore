@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store'
+import { writable, get } from 'svelte/store'
 
 export const completionText = writable('')
 export const completionVisible = writable(false)
@@ -98,13 +98,3 @@ export function acceptFullCompletion() {
   return text
 }
 
-/**
- * @template T
- * @param {import('svelte/store').Readable<T>} store
- * @returns {T}
- */
-function get(store) {
-  /** @type {any} */ let value = undefined
-  store.subscribe(v => value = v)()
-  return value
-}

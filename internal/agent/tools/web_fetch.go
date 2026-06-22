@@ -11,6 +11,8 @@ import (
 	"unicode"
 
 	"StarCore/internal/agent"
+	"StarCore/internal/sandbox"
+
 	"golang.org/x/net/html"
 )
 
@@ -44,6 +46,10 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]any) (string
 	url, _ := args["url"].(string)
 	if url == "" {
 		return "", fmt.Errorf("url is required")
+	}
+
+	if err := sandbox.ValidateURL(url); err != nil {
+		return "", fmt.Errorf("URL validation failed: %w", err)
 	}
 
 	client := &http.Client{Timeout: 15 * time.Second}

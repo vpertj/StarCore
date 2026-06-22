@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store'
+import { writable, get } from 'svelte/store'
 import { KEYS } from './constants.js'
 
 export const currentProject = writable(/** @type {string|null} */ (localStorage.getItem(KEYS.LAST_PROJECT) || null))
@@ -7,6 +7,19 @@ currentProject.subscribe(v => {
   try {
     if (v) localStorage.setItem(KEYS.LAST_PROJECT, v)
     else localStorage.removeItem(KEYS.LAST_PROJECT)
+  } catch {}
+})
+
+export const openProjects = writable(/** @type {string[]} */ ([]))
+
+try {
+  const saved = localStorage.getItem(KEYS.OPEN_PROJECTS)
+  if (saved) openProjects.set(JSON.parse(saved))
+} catch {}
+
+openProjects.subscribe(v => {
+  try {
+    localStorage.setItem(KEYS.OPEN_PROJECTS, JSON.stringify(v))
   } catch {}
 })
 
@@ -19,6 +32,7 @@ export async function openProjectFolder() {
         window.backend.SetProjectPath(folder)
       }
       addRecentProject(folder)
+      addOpenProject(folder)
     }
     return folder
   } catch (e) {
@@ -34,6 +48,37 @@ export function openProjectPath(path) {
     window.backend.SetProjectPath(path)
   }
   addRecentProject(path)
+  addOpenProject(path)
+}
+
+function addOpenProject(path) {
+  openProjects.update(list => {
+    if (list.includes(path)) return list
+    return [...list, path]
+  })
+}
+
+export function switchProject(path) {
+  if (!path) return
+  currentProject.set(path)
+  if (window.backend.SwitchProject) {
+    window.backend.SwitchProject(path)
+  }
+}
+
+export function closeProject(path) {
+  openProjects.update(list => list.filter(p => p !== path))
+  if (window.backend.CloseProject) {
+    window.backend.CloseProject(path)
+  }
+  if (get(currentProject) === path) {
+    const remaining = get(openProjects)
+    if (remaining.length > 0) {
+      switchProject(remaining[0])
+    } else {
+      currentProject.set(null)
+    }
+  }
 }
 
 export const recentProjects = writable(/** @type {string[]} */ ([]))
@@ -298,8 +343,3 @@ function refreshFileTree() {
   currentProject.update(project => project)
 }
 
-function get(store) {
-  let value = undefined
-  store.subscribe(v => value = v)()
-  return value
-}

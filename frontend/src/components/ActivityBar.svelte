@@ -53,7 +53,7 @@ async function openFolder() {
   {#if !$currentProject}
     <button
       class="w-10 h-10 flex items-center justify-center rounded transition-colors"
-      style="color: #4ec9b0"
+      style="color: var(--ai-color)"
       title={$t('openFolder')}
       onclick={openFolder}
     >

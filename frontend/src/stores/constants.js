@@ -3,6 +3,7 @@ export const KEYS = {
   // App state
   LAST_PROJECT:    'starcore-last-project',
   RECENT_PROJECTS: 'starcore-recent-projects',
+  OPEN_PROJECTS:   'starcore-open-projects',
   OPENED_FILES:    'starcore-opened-files',
   LAST_FILE:       'starcore-last-file',
 

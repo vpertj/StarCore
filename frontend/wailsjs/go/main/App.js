@@ -22,6 +22,14 @@ export function AddMCPServer(arg1) {
   return window['go']['main']['App']['AddMCPServer'](arg1);
 }
 
+export function AddRemoteConnection(arg1) {
+  return window['go']['main']['App']['AddRemoteConnection'](arg1);
+}
+
+export function AddWorkspaceRoot(arg1) {
+  return window['go']['main']['App']['AddWorkspaceRoot'](arg1);
+}
+
 export function AnalyzeProject(arg1) {
   return window['go']['main']['App']['AnalyzeProject'](arg1);
 }
@@ -38,12 +46,40 @@ export function ClearTokenUsage() {
   return window['go']['main']['App']['ClearTokenUsage']();
 }
 
+export function CloseProject(arg1) {
+  return window['go']['main']['App']['CloseProject'](arg1);
+}
+
 export function CloseWindow() {
   return window['go']['main']['App']['CloseWindow']();
 }
 
+export function CodeComplete(arg1) {
+  return window['go']['main']['App']['CodeComplete'](arg1);
+}
+
+export function CodeCompleteMultiLine(arg1) {
+  return window['go']['main']['App']['CodeCompleteMultiLine'](arg1);
+}
+
+export function CodeScanFile(arg1, arg2) {
+  return window['go']['main']['App']['CodeScanFile'](arg1, arg2);
+}
+
+export function CodeScanRules() {
+  return window['go']['main']['App']['CodeScanRules']();
+}
+
+export function CodeScanStats() {
+  return window['go']['main']['App']['CodeScanStats']();
+}
+
 export function ComputeDiff(arg1, arg2) {
   return window['go']['main']['App']['ComputeDiff'](arg1, arg2);
+}
+
+export function ConnectRemote(arg1) {
+  return window['go']['main']['App']['ConnectRemote'](arg1);
 }
 
 export function ConnectTerminal(arg1) {
@@ -60,6 +96,74 @@ export function CreateDir(arg1) {
 
 export function CreateFile(arg1) {
   return window['go']['main']['App']['CreateFile'](arg1);
+}
+
+export function DebugAddBreakpoint(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['DebugAddBreakpoint'](arg1, arg2, arg3, arg4);
+}
+
+export function DebugAddBreakpointByFunc(arg1, arg2) {
+  return window['go']['main']['App']['DebugAddBreakpointByFunc'](arg1, arg2);
+}
+
+export function DebugCheckDlv() {
+  return window['go']['main']['App']['DebugCheckDlv']();
+}
+
+export function DebugConsoleExecute(arg1, arg2) {
+  return window['go']['main']['App']['DebugConsoleExecute'](arg1, arg2);
+}
+
+export function DebugContinue(arg1) {
+  return window['go']['main']['App']['DebugContinue'](arg1);
+}
+
+export function DebugDetach(arg1) {
+  return window['go']['main']['App']['DebugDetach'](arg1);
+}
+
+export function DebugGetState(arg1) {
+  return window['go']['main']['App']['DebugGetState'](arg1);
+}
+
+export function DebugGetVariable(arg1, arg2, arg3) {
+  return window['go']['main']['App']['DebugGetVariable'](arg1, arg2, arg3);
+}
+
+export function DebugList() {
+  return window['go']['main']['App']['DebugList']();
+}
+
+export function DebugListBreakpoints(arg1) {
+  return window['go']['main']['App']['DebugListBreakpoints'](arg1);
+}
+
+export function DebugRemoveBreakpoint(arg1, arg2) {
+  return window['go']['main']['App']['DebugRemoveBreakpoint'](arg1, arg2);
+}
+
+export function DebugRestart(arg1) {
+  return window['go']['main']['App']['DebugRestart'](arg1);
+}
+
+export function DebugStart(arg1, arg2) {
+  return window['go']['main']['App']['DebugStart'](arg1, arg2);
+}
+
+export function DebugStepIn(arg1) {
+  return window['go']['main']['App']['DebugStepIn'](arg1);
+}
+
+export function DebugStepOut(arg1) {
+  return window['go']['main']['App']['DebugStepOut'](arg1);
+}
+
+export function DebugStepOver(arg1) {
+  return window['go']['main']['App']['DebugStepOver'](arg1);
+}
+
+export function DebugStop(arg1) {
+  return window['go']['main']['App']['DebugStop'](arg1);
 }
 
 export function DeleteConversation(arg1) {
@@ -86,6 +190,10 @@ export function DeleteSkill(arg1) {
   return window['go']['main']['App']['DeleteSkill'](arg1);
 }
 
+export function DisconnectRemote(arg1) {
+  return window['go']['main']['App']['DisconnectRemote'](arg1);
+}
+
 export function ExecuteCommand(arg1) {
   return window['go']['main']['App']['ExecuteCommand'](arg1);
 }
@@ -98,6 +206,10 @@ export function ExecuteToolCall(arg1) {
   return window['go']['main']['App']['ExecuteToolCall'](arg1);
 }
 
+export function FormatFile(arg1) {
+  return window['go']['main']['App']['FormatFile'](arg1);
+}
+
 export function GetAgentConfig(arg1) {
   return window['go']['main']['App']['GetAgentConfig'](arg1);
 }
@@ -108,6 +220,14 @@ export function GetAgents() {
 
 export function GetConversations(arg1) {
   return window['go']['main']['App']['GetConversations'](arg1);
+}
+
+export function GetExtensionCommands() {
+  return window['go']['main']['App']['GetExtensionCommands']();
+}
+
+export function GetExtensions() {
+  return window['go']['main']['App']['GetExtensions']();
 }
 
 export function GetKnowledge(arg1) {
@@ -134,6 +254,10 @@ export function GetModels(arg1) {
   return window['go']['main']['App']['GetModels'](arg1);
 }
 
+export function GetOpenProjects() {
+  return window['go']['main']['App']['GetOpenProjects']();
+}
+
 export function GetProjectAnalysis(arg1) {
   return window['go']['main']['App']['GetProjectAnalysis'](arg1);
 }
@@ -144,6 +268,10 @@ export function GetProviders() {
 
 export function GetProxy() {
   return window['go']['main']['App']['GetProxy']();
+}
+
+export function GetRecentConversations(arg1, arg2) {
+  return window['go']['main']['App']['GetRecentConversations'](arg1, arg2);
 }
 
 export function GetSkills() {
@@ -158,6 +286,14 @@ export function GetTools() {
   return window['go']['main']['App']['GetTools']();
 }
 
+export function GetWorkspaceRoots() {
+  return window['go']['main']['App']['GetWorkspaceRoots']();
+}
+
+export function GitBlame(arg1, arg2) {
+  return window['go']['main']['App']['GitBlame'](arg1, arg2);
+}
+
 export function GitBranch(arg1) {
   return window['go']['main']['App']['GitBranch'](arg1);
 }
@@ -170,6 +306,10 @@ export function GitCommit(arg1, arg2) {
   return window['go']['main']['App']['GitCommit'](arg1, arg2);
 }
 
+export function GitConflictFiles(arg1) {
+  return window['go']['main']['App']['GitConflictFiles'](arg1);
+}
+
 export function GitCreateBranch(arg1, arg2) {
   return window['go']['main']['App']['GitCreateBranch'](arg1, arg2);
 }
@@ -178,12 +318,20 @@ export function GitDiff(arg1, arg2) {
   return window['go']['main']['App']['GitDiff'](arg1, arg2);
 }
 
+export function GitDiffBetween(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['GitDiffBetween'](arg1, arg2, arg3, arg4);
+}
+
 export function GitFetch(arg1) {
   return window['go']['main']['App']['GitFetch'](arg1);
 }
 
 export function GitLog(arg1, arg2) {
   return window['go']['main']['App']['GitLog'](arg1, arg2);
+}
+
+export function GitLogFile(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GitLogFile'](arg1, arg2, arg3);
 }
 
 export function GitMerge(arg1, arg2) {
@@ -196,6 +344,10 @@ export function GitPull(arg1) {
 
 export function GitPush(arg1) {
   return window['go']['main']['App']['GitPush'](arg1);
+}
+
+export function GitRemoteList(arg1) {
+  return window['go']['main']['App']['GitRemoteList'](arg1);
 }
 
 export function GitStage(arg1, arg2) {
@@ -218,8 +370,12 @@ export function GitUnstage(arg1, arg2) {
   return window['go']['main']['App']['GitUnstage'](arg1, arg2);
 }
 
-export function Greet(arg1) {
-  return window['go']['main']['App']['Greet'](arg1);
+export function GitVisualDiff(arg1, arg2) {
+  return window['go']['main']['App']['GitVisualDiff'](arg1, arg2);
+}
+
+export function IndexProject(arg1) {
+  return window['go']['main']['App']['IndexProject'](arg1);
 }
 
 export function InstallLanguagePackage(arg1) {
@@ -246,6 +402,10 @@ export function LSPCodeActions(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['main']['App']['LSPCodeActions'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function LSPCodeLens(arg1) {
+  return window['go']['main']['App']['LSPCodeLens'](arg1);
+}
+
 export function LSPCompletions(arg1, arg2, arg3) {
   return window['go']['main']['App']['LSPCompletions'](arg1, arg2, arg3);
 }
@@ -262,24 +422,64 @@ export function LSPDidOpen(arg1, arg2) {
   return window['go']['main']['App']['LSPDidOpen'](arg1, arg2);
 }
 
+export function LSPDocumentSymbols(arg1) {
+  return window['go']['main']['App']['LSPDocumentSymbols'](arg1);
+}
+
+export function LSPFoldingRanges(arg1) {
+  return window['go']['main']['App']['LSPFoldingRanges'](arg1);
+}
+
+export function LSPFormatting(arg1) {
+  return window['go']['main']['App']['LSPFormatting'](arg1);
+}
+
 export function LSPHover(arg1, arg2, arg3) {
   return window['go']['main']['App']['LSPHover'](arg1, arg2, arg3);
+}
+
+export function LSPInlayHints(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['LSPInlayHints'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function LSPReferences(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['LSPReferences'](arg1, arg2, arg3, arg4);
 }
 
+export function LSPRename(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['LSPRename'](arg1, arg2, arg3, arg4);
+}
+
 export function LSPShutdown() {
   return window['go']['main']['App']['LSPShutdown']();
+}
+
+export function LSPSignatureHelp(arg1, arg2, arg3) {
+  return window['go']['main']['App']['LSPSignatureHelp'](arg1, arg2, arg3);
+}
+
+export function LSPWorkspaceSymbols(arg1) {
+  return window['go']['main']['App']['LSPWorkspaceSymbols'](arg1);
 }
 
 export function ListDir(arg1) {
   return window['go']['main']['App']['ListDir'](arg1);
 }
 
+export function ListPipelines() {
+  return window['go']['main']['App']['ListPipelines']();
+}
+
+export function ListRemoteConnections() {
+  return window['go']['main']['App']['ListRemoteConnections']();
+}
+
 export function ListTerminals() {
   return window['go']['main']['App']['ListTerminals']();
+}
+
+export function ListTerminalsByProject(arg1) {
+  return window['go']['main']['App']['ListTerminalsByProject'](arg1);
 }
 
 export function LoadCustomModels() {
@@ -288,6 +488,10 @@ export function LoadCustomModels() {
 
 export function LoadEditorSettings() {
   return window['go']['main']['App']['LoadEditorSettings']();
+}
+
+export function LoadSessionState() {
+  return window['go']['main']['App']['LoadSessionState']();
 }
 
 export function MaximizeWindow() {
@@ -306,6 +510,30 @@ export function OpenFolder() {
   return window['go']['main']['App']['OpenFolder']();
 }
 
+export function QuickVerifyFile(arg1) {
+  return window['go']['main']['App']['QuickVerifyFile'](arg1);
+}
+
+export function RAGIndexFileIncremental(arg1, arg2) {
+  return window['go']['main']['App']['RAGIndexFileIncremental'](arg1, arg2);
+}
+
+export function RAGIndexStats(arg1) {
+  return window['go']['main']['App']['RAGIndexStats'](arg1);
+}
+
+export function RAGRemoveFileFromIndex(arg1, arg2) {
+  return window['go']['main']['App']['RAGRemoveFileFromIndex'](arg1, arg2);
+}
+
+export function RAGSearch(arg1, arg2, arg3) {
+  return window['go']['main']['App']['RAGSearch'](arg1, arg2, arg3);
+}
+
+export function RAGSearchHybrid(arg1, arg2, arg3) {
+  return window['go']['main']['App']['RAGSearchHybrid'](arg1, arg2, arg3);
+}
+
 export function ReadFile(arg1) {
   return window['go']['main']['App']['ReadFile'](arg1);
 }
@@ -322,6 +550,14 @@ export function RemoveMCPServer(arg1) {
   return window['go']['main']['App']['RemoveMCPServer'](arg1);
 }
 
+export function RemoveRemoteConnection(arg1) {
+  return window['go']['main']['App']['RemoveRemoteConnection'](arg1);
+}
+
+export function RemoveWorkspaceRoot(arg1) {
+  return window['go']['main']['App']['RemoveWorkspaceRoot'](arg1);
+}
+
 export function RenameFile(arg1, arg2) {
   return window['go']['main']['App']['RenameFile'](arg1, arg2);
 }
@@ -336,6 +572,14 @@ export function RespondToAsk(arg1) {
 
 export function RespondToolApproval(arg1, arg2) {
   return window['go']['main']['App']['RespondToolApproval'](arg1, arg2);
+}
+
+export function RunPipeline(arg1) {
+  return window['go']['main']['App']['RunPipeline'](arg1);
+}
+
+export function RunTests(arg1) {
+  return window['go']['main']['App']['RunTests'](arg1);
 }
 
 export function SaveConversation(arg1) {
@@ -358,6 +602,10 @@ export function SaveMessage(arg1) {
   return window['go']['main']['App']['SaveMessage'](arg1);
 }
 
+export function SaveSessionState(arg1) {
+  return window['go']['main']['App']['SaveSessionState'](arg1);
+}
+
 export function SaveSkill(arg1) {
   return window['go']['main']['App']['SaveSkill'](arg1);
 }
@@ -368,6 +616,14 @@ export function SaveTokenUsageEntry(arg1) {
 
 export function SearchFiles(arg1, arg2) {
   return window['go']['main']['App']['SearchFiles'](arg1, arg2);
+}
+
+export function SetActiveWorkspaceRoot(arg1) {
+  return window['go']['main']['App']['SetActiveWorkspaceRoot'](arg1);
+}
+
+export function SetExtensionEnabled(arg1, arg2) {
+  return window['go']['main']['App']['SetExtensionEnabled'](arg1, arg2);
 }
 
 export function SetProjectPath(arg1) {
@@ -402,6 +658,14 @@ export function StopMCPServer(arg1) {
   return window['go']['main']['App']['StopMCPServer'](arg1);
 }
 
+export function StopPipeline() {
+  return window['go']['main']['App']['StopPipeline']();
+}
+
+export function SwitchProject(arg1) {
+  return window['go']['main']['App']['SwitchProject'](arg1);
+}
+
 export function TerminalResize(arg1, arg2, arg3) {
   return window['go']['main']['App']['TerminalResize'](arg1, arg2, arg3);
 }
@@ -412,6 +676,14 @@ export function TerminalWrite(arg1, arg2) {
 
 export function TestProvider(arg1) {
   return window['go']['main']['App']['TestProvider'](arg1);
+}
+
+export function VerifyFile(arg1) {
+  return window['go']['main']['App']['VerifyFile'](arg1);
+}
+
+export function VerifyProject() {
+  return window['go']['main']['App']['VerifyProject']();
 }
 
 export function WriteFile(arg1, arg2) {

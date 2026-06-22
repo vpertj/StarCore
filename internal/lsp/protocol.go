@@ -1,5 +1,10 @@
 package lsp
 
+import (
+	"path/filepath"
+	"strings"
+)
+
 // JSON-RPC 2.0 types
 type Request struct {
 	JSONRPC string      `json:"jsonrpc"`
@@ -276,5 +281,21 @@ func SeverityString(severity int) string {
 }
 
 func DocumentURI(path string) string {
-	return "file:///" + path
+	abs := path
+	if !filepath.IsAbs(path) {
+		if a, err := filepath.Abs(path); err == nil {
+			abs = a
+		}
+	}
+	abs = filepath.ToSlash(abs)
+	return "file:///" + abs
+}
+
+func URItoFilePath(uri string) string {
+	p := strings.TrimPrefix(uri, "file:///")
+	if p == uri {
+		p = strings.TrimPrefix(uri, "file://")
+	}
+	p = filepath.FromSlash(p)
+	return p
 }

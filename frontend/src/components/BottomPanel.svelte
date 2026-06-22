@@ -9,6 +9,8 @@
     toggleMaximizePanel,
   } from "../stores/ui.js";
   import Terminal from "./Terminal.svelte";
+  import TestRunnerPanel from "./TestRunnerPanel.svelte";
+  import DebugPanel from "./DebugPanel.svelte";
   import { activeFileDiagnostics } from "../stores/diagnostics.js";
   import { logEntries, clearLogs } from "../stores/output.js";
   import { onMount } from "svelte";
@@ -18,6 +20,7 @@
     createTerminalTab,
     closeTerminalTab,
     ensureDefaultTerminal,
+    renameTerminal,
   } from "../stores/terminal.js";
   import { t } from "../stores/i18n.js";
 
@@ -28,11 +31,28 @@
   import { get } from "svelte/store";
 
   let isResizing = $state(false);
+  let renamingTermId = $state(null);
+  let renameValue = $state('');
+
+  function startRenameTerm(tab) {
+    renamingTermId = tab.id;
+    renameValue = tab.title;
+  }
+
+  function confirmRenameTerm() {
+    if (renamingTermId && renameValue.trim()) {
+      renameTerminal(renamingTermId, renameValue.trim());
+    }
+    renamingTermId = null;
+    renameValue = '';
+  }
 
   const tabs = [
     { id: "problems", labelKey: "terminal.problems", icon: "problems" },
     { id: "output", labelKey: "terminal.output", icon: "output" },
+    { id: "tests", labelKey: "testRunner.title", icon: "tests" },
     { id: "terminal", labelKey: "terminal.title", icon: "terminal" },
+    { id: "debug", labelKey: "debug.title", icon: "debug" },
   ];
 
   function onPanelHeaderMouseDown(e) {
@@ -112,6 +132,17 @@
               />
               <path d="M9 11h3" />
             </svg>
+          {:else if tab.icon === "tests"}
+            <svg
+              viewBox="0 0 16 16"
+              class="tab-icon"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.2"
+            >
+              <circle cx="8" cy="8" r="5.5" />
+              <path d="M5.5 8l2 2 3.5-3.5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
           {:else if tab.icon === "output"}
             <svg
               viewBox="0 0 16 16"
@@ -148,6 +179,7 @@
               class="term-tab-btn"
               class:active={$activeTerminalId === termTab.id}
               onclick={() => activeTerminalId.set(termTab.id)}
+              ondblclick={() => startRenameTerm(termTab)}
             >
               <svg
                 viewBox="0 0 16 16"
@@ -160,7 +192,18 @@
                 <path d="M4 6l3 2L4 10" />
                 <path d="M9 10h3" />
               </svg>
-              <span class="term-tab-name">{termTab.title}</span>
+              {#if renamingTermId === termTab.id}
+                <input
+                  type="text"
+                  bind:value={renameValue}
+                  class="term-rename-input"
+                  onblur={confirmRenameTerm}
+                  onkeydown={(e) => { if (e.key === 'Enter') confirmRenameTerm(); if (e.key === 'Escape') { renamingTermId = null; renameValue = '' } }}
+                  autofocus
+                />
+              {:else}
+                <span class="term-tab-name">{termTab.title}</span>
+              {/if}
               {#if $terminalTabs.length > 1}
                 <!-- svelte-ignore a11y_click_events_have_key_events -->
                 <span
@@ -327,6 +370,14 @@
           {/each}
         {/if}
       </div>
+    {:else if $bottomPanelTab === "tests"}
+      <div class="panel-content-inner" style="height:100%">
+        <TestRunnerPanel />
+      </div>
+    {:else if $bottomPanelTab === "debug"}
+      <div class="panel-content-inner" style="height:100%">
+        <DebugPanel />
+      </div>
     {:else if $bottomPanelTab === "problems"}
       <div class="panel-content-inner">
         {#if $activeFileDiagnostics.length === 0}
@@ -364,10 +415,14 @@
     background-color: var(--bg-primary);
     min-height: 0;
     flex-shrink: 0;
+    transition: height 0.2s ease;
+    overflow: hidden;
   }
 
   .bottom-panel.hidden {
-    display: none;
+    height: 0 !important;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .panel-header {
@@ -487,6 +542,17 @@
     text-overflow: ellipsis;
   }
 
+  .term-rename-input {
+    max-width: 100px;
+    padding: 0 4px;
+    font-size: 11px;
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    outline: none;
+  }
+
   .term-close {
     display: inline-flex;
     align-items: center;
@@ -550,7 +616,7 @@
 
   .close-btn:hover {
     background-color: rgba(241, 76, 76, 0.15);
-    color: #f14c4c;
+    color: var(--error);
   }
 
   .panel-content {
@@ -577,7 +643,7 @@
   }
 
   .diagnostic-error {
-    color: #f14c4c;
+    color: var(--error);
   }
   .diagnostic-warning {
     color: #cca700;
@@ -608,7 +674,7 @@
     background-color: rgba(204, 167, 0, 0.05);
   }
   .output-error {
-    color: #f14c4c;
+    color: var(--error);
     background-color: rgba(241, 76, 76, 0.05);
   }
 

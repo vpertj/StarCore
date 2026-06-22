@@ -2,7 +2,6 @@ package skill
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +12,7 @@ import (
 func LoadSkillsFromDir(dir string) []SkillDef {
 	var skills []SkillDef
 
-	entries, err := ioutil.ReadDir(dir)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return skills
 	}
@@ -25,7 +24,7 @@ func LoadSkillsFromDir(dir string) []SkillDef {
 
 		skillPath := filepath.Join(dir, entry.Name())
 		skillFile := filepath.Join(skillPath, "SKILL.md")
-		data, err := ioutil.ReadFile(skillFile)
+		data, err := os.ReadFile(skillFile)
 		if err != nil {
 			continue
 		}
@@ -141,7 +140,7 @@ func extractIcon(content string) string {
 // GetSkillsDir returns the path where external skills are stored
 func GetSkillsDir(configDir string) string {
 	dir := filepath.Join(configDir, "skills")
-	os.MkdirAll(dir, 0755)
+	_ = os.MkdirAll(dir, 0755)
 	return dir
 }
 

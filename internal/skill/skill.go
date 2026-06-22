@@ -28,3 +28,32 @@ type SkillResult struct {
 	Content    string `json:"content"`
 	ResultType string `json:"resultType"`
 }
+
+type SkillPipelineStep struct {
+	SkillID   string `json:"skillId"`
+	Condition string `json:"condition,omitempty"`
+	InputFrom string `json:"inputFrom,omitempty"`
+	Optional  bool   `json:"optional,omitempty"`
+}
+
+type SkillPipeline struct {
+	ID          string              `json:"id"`
+	Name        string              `json:"name"`
+	Description string              `json:"description"`
+	Steps       []SkillPipelineStep `json:"steps"`
+}
+
+type PipelineStepResult struct {
+	StepIndex int          `json:"stepIndex"`
+	SkillID   string       `json:"skillId"`
+	Result    *SkillResult `json:"result"`
+	Skipped   bool         `json:"skipped,omitempty"`
+	Error     string       `json:"error,omitempty"`
+}
+
+type PipelineExecutionResult struct {
+	PipelineID string               `json:"pipelineId"`
+	Steps      []PipelineStepResult `json:"steps"`
+	Success    bool                 `json:"success"`
+	Error      string               `json:"error,omitempty"`
+}

@@ -156,11 +156,12 @@ func FindLocalBin(command string) string {
 }
 
 type Manager struct {
-	ctx     context.Context
-	servers map[string]*ServerInfo // keyed by languageID
-	mu      sync.Mutex
-	docs    map[string]*docState // keyed by filepath
-	docsMu  sync.Mutex
+	ctx      context.Context
+	rootPath string
+	servers  map[string]*ServerInfo // keyed by languageID
+	mu       sync.Mutex
+	docs     map[string]*docState // keyed by filepath
+	docsMu   sync.Mutex
 }
 
 type docState struct {
@@ -179,6 +180,10 @@ func NewManager() *Manager {
 
 func (m *Manager) SetContext(ctx context.Context) {
 	m.ctx = ctx
+}
+
+func (m *Manager) SetRootPath(rootPath string) {
+	m.rootPath = rootPath
 }
 
 func (m *Manager) RegisterServer(langID, command string, args []string, extensions []string) {
@@ -289,7 +294,7 @@ func (m *Manager) getOrStartServer(filePath string) (*ServerInfo, error) {
 		if err := json.Unmarshal(params, &diagParams); err != nil {
 			return
 		}
-		filePath := strings.TrimPrefix(diagParams.URI, "file:///")
+		filePath := URItoFilePath(diagParams.URI)
 
 		diags := make([]FrontendDiagnostic, 0, len(diagParams.Diagnostics))
 		for _, d := range diagParams.Diagnostics {
@@ -309,7 +314,11 @@ func (m *Manager) getOrStartServer(filePath string) (*ServerInfo, error) {
 	})
 
 	// Initialize
-	rootURI := DocumentURI(".")
+	rootPath := m.rootPath
+	if rootPath == "" {
+		rootPath = "."
+	}
+	rootURI := DocumentURI(rootPath)
 	initParams := InitializeParams{
 		ProcessID: 0,
 		RootURI:   rootURI,
@@ -621,4 +630,263 @@ func (m *Manager) CloseFile(filePath string) {
 			TextDocument: TextDocumentIdentifier{URI: DocumentURI(filePath)},
 		})
 	}
+}
+
+type RenameResult struct {
+	Changes map[string][]TextEdit `json:"changes"`
+}
+
+type SignatureHelp struct {
+	Signatures      []SignatureInfo `json:"signatures"`
+	ActiveSignature int             `json:"activeSignature"`
+	ActiveParameter int             `json:"activeParameter"`
+}
+
+type SignatureInfo struct {
+	Label         string          `json:"label"`
+	Documentation string          `json:"documentation,omitempty"`
+	Parameters    []ParameterInfo `json:"parameters,omitempty"`
+}
+
+type ParameterInfo struct {
+	Label         string `json:"label"`
+	Documentation string `json:"documentation,omitempty"`
+}
+
+type WorkspaceSymbol struct {
+	Name          string   `json:"name"`
+	Kind          int      `json:"kind"`
+	ContainerName string   `json:"containerName,omitempty"`
+	Location      Location `json:"location"`
+}
+
+func (m *Manager) Rename(filePath string, line, col int, newName string) (*RenameResult, error) {
+	srv, err := m.getOrStartServer(filePath)
+	if err != nil {
+		return nil, err
+	}
+	if srv.client == nil {
+		return nil, fmt.Errorf("LSP server not running")
+	}
+
+	var result RenameResult
+	err = srv.client.Call("textDocument/rename", map[string]any{
+		"textDocument": TextDocumentIdentifier{URI: DocumentURI(filePath)},
+		"position":     Position{Line: line, Character: col},
+		"newName":      newName,
+	}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("rename: %w", err)
+	}
+	return &result, nil
+}
+
+func (m *Manager) Formatting(filePath string) ([]TextEdit, error) {
+	srv, err := m.getOrStartServer(filePath)
+	if err != nil {
+		return nil, err
+	}
+	if srv.client == nil {
+		return nil, fmt.Errorf("LSP server not running")
+	}
+
+	var edits []TextEdit
+	err = srv.client.Call("textDocument/formatting", map[string]any{
+		"textDocument": TextDocumentIdentifier{URI: DocumentURI(filePath)},
+		"options": map[string]any{
+			"tabSize":      4,
+			"insertSpaces": true,
+		},
+	}, &edits)
+	if err != nil {
+		return nil, fmt.Errorf("formatting: %w", err)
+	}
+	return edits, nil
+}
+
+func (m *Manager) RangeFormatting(filePath string, startLine, startCol, endLine, endCol int) ([]TextEdit, error) {
+	srv, err := m.getOrStartServer(filePath)
+	if err != nil {
+		return nil, err
+	}
+	if srv.client == nil {
+		return nil, fmt.Errorf("LSP server not running")
+	}
+
+	var edits []TextEdit
+	err = srv.client.Call("textDocument/rangeFormatting", map[string]any{
+		"textDocument": TextDocumentIdentifier{URI: DocumentURI(filePath)},
+		"range": Range{
+			Start: Position{Line: startLine, Character: startCol},
+			End:   Position{Line: endLine, Character: endCol},
+		},
+		"options": map[string]any{
+			"tabSize":      4,
+			"insertSpaces": true,
+		},
+	}, &edits)
+	if err != nil {
+		return nil, fmt.Errorf("rangeFormatting: %w", err)
+	}
+	return edits, nil
+}
+
+func (m *Manager) SignatureHelp(filePath string, line, col int) (*SignatureHelp, error) {
+	srv, err := m.getOrStartServer(filePath)
+	if err != nil {
+		return nil, err
+	}
+	if srv.client == nil {
+		return nil, fmt.Errorf("LSP server not running")
+	}
+
+	var result SignatureHelp
+	err = srv.client.Call("textDocument/signatureHelp", map[string]any{
+		"textDocument": TextDocumentIdentifier{URI: DocumentURI(filePath)},
+		"position":     Position{Line: line, Character: col},
+	}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("signatureHelp: %w", err)
+	}
+	return &result, nil
+}
+
+func (m *Manager) WorkspaceSymbols(query string) ([]WorkspaceSymbol, error) {
+	m.mu.Lock()
+	var client *Client
+	for _, info := range m.servers {
+		if info.client != nil {
+			client = info.client
+			break
+		}
+	}
+	m.mu.Unlock()
+
+	if client == nil {
+		return nil, fmt.Errorf("no language server running")
+	}
+
+	var symbols []WorkspaceSymbol
+	err := client.Call("workspace/symbol", map[string]any{
+		"query": query,
+	}, &symbols)
+	if err != nil {
+		return nil, fmt.Errorf("workspaceSymbol: %w", err)
+	}
+	return symbols, nil
+}
+
+type CodeLens struct {
+	Range   Range    `json:"range"`
+	Command *Command `json:"command,omitempty"`
+	Data    any      `json:"data,omitempty"`
+}
+
+type Command struct {
+	Title     string `json:"title"`
+	Command   string `json:"command"`
+	Arguments []any  `json:"arguments,omitempty"`
+}
+
+func (m *Manager) GetCodeLens(filePath string) ([]CodeLens, error) {
+	srv, err := m.getOrStartServer(filePath)
+	if err != nil {
+		return nil, err
+	}
+	if srv.client == nil {
+		return nil, fmt.Errorf("LSP server not running")
+	}
+
+	var lenses []CodeLens
+	err = srv.client.Call("textDocument/codeLens", map[string]any{
+		"textDocument": TextDocumentIdentifier{URI: DocumentURI(filePath)},
+	}, &lenses)
+	if err != nil {
+		return nil, fmt.Errorf("codeLens: %w", err)
+	}
+	return lenses, nil
+}
+
+type InlayHint struct {
+	Position     Position `json:"position"`
+	Label        any      `json:"label"`
+	Kind         int      `json:"kind,omitempty"`
+	Tooltip      any      `json:"tooltip,omitempty"`
+	PaddingLeft  bool     `json:"paddingLeft,omitempty"`
+	PaddingRight bool     `json:"paddingRight,omitempty"`
+}
+
+func (m *Manager) GetInlayHints(filePath string, startLine, startCol, endLine, endCol int) ([]InlayHint, error) {
+	srv, err := m.getOrStartServer(filePath)
+	if err != nil {
+		return nil, err
+	}
+	if srv.client == nil {
+		return nil, fmt.Errorf("LSP server not running")
+	}
+
+	var hints []InlayHint
+	err = srv.client.Call("textDocument/inlayHint", map[string]any{
+		"textDocument": TextDocumentIdentifier{URI: DocumentURI(filePath)},
+		"range": map[string]any{
+			"start": map[string]any{"line": startLine, "character": startCol},
+			"end":   map[string]any{"line": endLine, "character": endCol},
+		},
+	}, &hints)
+	if err != nil {
+		return nil, fmt.Errorf("inlayHint: %w", err)
+	}
+	return hints, nil
+}
+
+type DocumentSymbol struct {
+	Name           string           `json:"name"`
+	Kind           int              `json:"kind"`
+	Range          Range            `json:"range"`
+	SelectionRange Range            `json:"selectionRange"`
+	Children       []DocumentSymbol `json:"children,omitempty"`
+}
+
+func (m *Manager) GetDocumentSymbols(filePath string) ([]DocumentSymbol, error) {
+	srv, err := m.getOrStartServer(filePath)
+	if err != nil {
+		return nil, err
+	}
+	if srv.client == nil {
+		return nil, fmt.Errorf("LSP server not running")
+	}
+
+	var symbols []DocumentSymbol
+	err = srv.client.Call("textDocument/documentSymbol", map[string]any{
+		"textDocument": TextDocumentIdentifier{URI: DocumentURI(filePath)},
+	}, &symbols)
+	if err != nil {
+		return nil, fmt.Errorf("documentSymbol: %w", err)
+	}
+	return symbols, nil
+}
+
+type FoldingRange struct {
+	StartLine int    `json:"startLine"`
+	EndLine   int    `json:"endLine"`
+	Kind      string `json:"kind,omitempty"`
+}
+
+func (m *Manager) GetFoldingRanges(filePath string) ([]FoldingRange, error) {
+	srv, err := m.getOrStartServer(filePath)
+	if err != nil {
+		return nil, err
+	}
+	if srv.client == nil {
+		return nil, fmt.Errorf("LSP server not running")
+	}
+
+	var ranges []FoldingRange
+	err = srv.client.Call("textDocument/foldingRange", map[string]any{
+		"textDocument": TextDocumentIdentifier{URI: DocumentURI(filePath)},
+	}, &ranges)
+	if err != nil {
+		return nil, fmt.Errorf("foldingRange: %w", err)
+	}
+	return ranges, nil
 }

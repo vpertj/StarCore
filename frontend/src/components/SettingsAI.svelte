@@ -1058,11 +1058,12 @@
             onclick={async () => {
               if (!editProviderName && editAllModels.length === 0) { alert('请先填写供应商名称并添加至少一个模型'); return; }
               const isBuiltin = builtinProviders.some(bp => bp.id === editProviderId);
-              const groupId = isBuiltin ? editProviderId : ("custom_" + (editProviderName || Date.now().toString(36)));
+              const groupId = isBuiltin ? editProviderId : ("custom_" + (editProviderName || Date.now().toString(36)).replace(/\s+/g, '_'));
               const backendPid = editProviderType === "anthropic" ? "anthropic" : editProviderType === "ollama" ? "ollama" : "openai";
 
-              // Persist provider config to Go backend first, then refresh
-              await setProviderConfig(backendPid, { apiKey: editApiKey, endpoint: editEndpoint });
+              // Persist provider config to Go backend using groupId (not backendPid)
+              // so each custom provider has its own config entry
+              await setProviderConfig(groupId, { apiKey: editApiKey, endpoint: editEndpoint });
 
               // Build final model list: keep models NOT for this provider,
               // then add updated existing models + pending models with final groupId/providerId

@@ -1,9 +1,11 @@
 <script>
  import { onMount, onDestroy } from 'svelte'
-  import { EditorState, Compartment } from '@codemirror/state'
+  import { EditorState, Compartment, StateField, StateEffect } from '@codemirror/state'
  import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, WidgetType, Decoration, drawSelection } from '@codemirror/view'
  import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
- import { syntaxHighlighting, defaultHighlightStyle, HighlightStyle } from '@codemirror/language'
+  import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
+ import { syntaxHighlighting, defaultHighlightStyle, HighlightStyle, bracketMatching, foldGutter, indentOnInput } from '@codemirror/language'
+  import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete'
  import { tags } from '@lezer/highlight'
  import { go } from '@codemirror/lang-go'
  import { javascript } from '@codemirror/lang-javascript'
@@ -20,10 +22,9 @@
  import { xml } from '@codemirror/lang-xml'
   import { yaml } from '@codemirror/lang-yaml'
   import { vue } from '@codemirror/lang-vue'
- import { StateField, StateEffect } from '@codemirror/state'
- import { linter, lintGutter } from '@codemirror/lint'
+  import { linter, lintGutter } from '@codemirror/lint'
  import { syntaxTree } from '@codemirror/language'
- import { activeFile } from '../stores/app.js'
+ import { activeFile, editorGroups } from '../stores/app.js'
  import { editorSettings } from '../stores/editorSettings.js'
  import { t } from '../stores/i18n.js'
  import { EventsOn } from '../../wailsjs/runtime/runtime.js'
@@ -33,11 +34,18 @@
  import { diagnostics as diagnosticsStore, activeFileDiagnostics } from '../stores/diagnostics.js'
  import { currentTheme, getThemeById } from '../stores/theme.js'
 
+  let { groupId = 'group-1' } = $props()
+
+  let groupActiveFile = $derived(groupId === 'group-1' ? $activeFile : ($editorGroups.find(g => g.id === groupId)?.activeFile || null))
+
   /** @type {HTMLDivElement} */ let editorContainer
   /** @type {EditorView|null} */ let view = null
   const highlightCompartment = new Compartment
   let content = $state('')
   let isDirty = $state(false)
+  let saveError = $state('')
+  let conflictPending = $state(false)
+  let conflictNewContent = $state('')
  let lspChangeTimer = null
   let lastFilePath = ''
   /** @type {(() => void)|null} */ let completionUnsubscribe = null
@@ -52,6 +60,9 @@
   let contextMenuPos = $state({ x: 0, y: 0 })
   let aiToolbarVisible = $state(false)
   let aiToolbarPos = $state({ x: 0, y: 0 })
+
+  // Debug line effect — defined at component scope so it's accessible everywhere
+  const setDebugLine = StateEffect.define()
 
   function getLanguageFromPath(path) {
     if (!path) return 'plaintext'
@@ -271,20 +282,43 @@
    }
  }
 
- async function saveFile() {
-   const currentFilePath = getStoreValue(activeFile)
-   if (!currentFilePath || !isDirty) return
-   try {
-     await window.backend.WriteFile(currentFilePath, content)
-     // Notify LSP of the change
-     if (window.backend?.LSPDidChange) {
-       window.backend.LSPDidChange(currentFilePath, content).catch(() => {})
-     }
-     isDirty = false
-   } catch (err) {
-     console.error('Failed to save file:', err)
-   }
- }
+  let autoSaveTimer = null
+  function scheduleAutoSave() {
+    if (autoSaveTimer) clearTimeout(autoSaveTimer)
+    const settings = getStoreValue(editorSettings)
+    if (!settings.autoSave) return
+    const delay = settings.autoSaveDelay || 1000
+    autoSaveTimer = setTimeout(() => { saveFile() }, delay)
+  }
+
+  async function saveFile() {
+    const currentFilePath = groupId === 'group-1' ? getStoreValue(activeFile) : (getStoreValue(editorGroups).find(g => g.id === groupId)?.activeFile || null)
+    if (!currentFilePath || !isDirty) return
+    try {
+      const settings = getStoreValue(editorSettings)
+      if (settings.formatOnSave && window.backend?.FormatFile) {
+        try {
+          const formatted = await window.backend.FormatFile(currentFilePath)
+          if (formatted && formatted !== content) {
+            content = formatted
+            if (view) {
+              view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: formatted } })
+            }
+          }
+        } catch {}
+      }
+      await window.backend.WriteFile(currentFilePath, content)
+      if (window.backend?.LSPDidChange) {
+        window.backend.LSPDidChange(currentFilePath, content).catch(() => {})
+      }
+      isDirty = false
+      saveError = ''
+    } catch (err) {
+      console.error('Failed to save file:', err)
+      saveError = String(err?.message || err || 'Save failed')
+      setTimeout(() => { saveError = '' }, 4000)
+    }
+  }
 
   function initEditor(filePath) {
     try {
@@ -298,20 +332,65 @@
      view = null
    }
 
-   const languageExt = getLanguageExtension(filePath)
+    const languageExt = getLanguageExtension(filePath)
 
-   const extensions = [
-     lineNumbers(),
-     highlightActiveLine(),
-     highlightActiveLineGutter(),
-     lintGutter(),
-     customLinter,
-     drawSelection(),
-     history(),
-     keymap.of([
-       ...defaultKeymap,
-       ...historyKeymap,
-       indentWithTab,
+    const debugLineField = StateField.define({
+      create() { return Decoration.none },
+      update(deco, tr) {
+        for (let e of tr.effects) {
+          if (e.is(setDebugLine)) {
+            if (e.value === null) return Decoration.none
+            const line = e.value
+            try {
+              const linePos = tr.state.doc.line(Math.min(line, tr.state.doc.lines))
+              return Decoration.line({ class: 'cm-debug-current-line' }).range(linePos.from)
+            } catch { return Decoration.none }
+          }
+        }
+        return deco
+      },
+      provide: f => EditorView.decorations.from(f),
+    })
+
+    const debugGutterField = StateField.define({
+      create() { return Decoration.none },
+      update(deco, tr) {
+        for (let e of tr.effects) {
+          if (e.is(setDebugLine)) {
+            if (e.value === null) return Decoration.none
+            const line = e.value
+            try {
+              const linePos = tr.state.doc.line(Math.min(line, tr.state.doc.lines))
+              return Decoration.line({ class: 'cm-debug-current-gutter' }).range(linePos.from)
+            } catch { return Decoration.none }
+          }
+        }
+        return deco
+      },
+      provide: f => EditorView.decorations.from(f),
+    })
+
+    const extensions = [
+      lineNumbers(),
+      highlightActiveLine(),
+       highlightActiveLineGutter(),
+       debugLineField,
+       debugGutterField,
+       lintGutter(),
+      foldGutter(),
+      customLinter,
+      drawSelection(),
+      history(),
+      bracketMatching(),
+      closeBrackets(),
+      indentOnInput(),
+      highlightSelectionMatches(),
+      keymap.of([
+        ...defaultKeymap,
+        ...searchKeymap,
+        ...historyKeymap,
+        ...closeBracketsKeymap,
+        indentWithTab,
        {
          key: 'Alt-\\',
          run: () => {
@@ -353,14 +432,35 @@
          }
        }
      ]),
-       highlightCompartment.of(getHighlightExtension(getStoreValue(currentTheme))),
-     EditorView.updateListener.of((update) => {
-       if (update.docChanged) {
-         content = update.state.doc.toString()
-         isDirty = true
-         activeFileContent.set(content)
-         triggerCompletion(filePath, false)
-       }
+        highlightCompartment.of(getHighlightExtension(getStoreValue(currentTheme))),
+      // Debug gutter decorations
+      EditorView.theme({
+        '.cm-gutter-lint': { display: 'none' },
+      }),
+      // Click gutter to toggle breakpoint
+      EditorView.domEventHandlers({
+        gutterClick: (view, line, gutter, event) => {
+          if (gutter?.classList?.contains('cm-lineNumbers')) {
+            const lineNo = view.state.doc.lineAt(line).number
+            const fp = groupId === 'group-1' ? getStoreValue(activeFile) : (getStoreValue(editorGroups).find(g => g.id === groupId)?.activeFile || null)
+            if (fp) {
+              import('../stores/debug.js').then(({ toggleBreakpoint }) => {
+                toggleBreakpoint(fp, lineNo)
+              })
+            }
+            return true
+          }
+          return false
+        },
+      }),
+       EditorView.updateListener.of((update) => {
+        if (update.docChanged) {
+          content = update.state.doc.toString()
+          isDirty = true
+          activeFileContent.set(content)
+          triggerCompletion(filePath, false)
+          scheduleAutoSave()
+        }
         if (update.selectionSet) {
           const sel = update.state.selection.main
           if (sel.from !== sel.to) {
@@ -405,8 +505,14 @@
          fontSize: '12px',
          fontFamily: "'JetBrains Mono', 'Cascadia Code', monospace",
        },
-       '.cm-activeLine': { backgroundColor: 'rgba(255, 255, 255, 0.03)' },
-       '.cm-activeLineGutter': { backgroundColor: 'rgba(255, 255, 255, 0.04)', color: '#999999' },
+        '.cm-activeLine': { backgroundColor: 'rgba(255, 255, 255, 0.03)' },
+        '.cm-activeLineGutter': { backgroundColor: 'rgba(255, 255, 255, 0.04)', color: '#999999' },
+        // Debug breakpoint gutter
+        '.cm-gutter-lint .cm-gutterElement': { display: 'none' },
+        // Current debug line highlight
+        '.cm-debug-current-line': { backgroundColor: 'rgba(97, 175, 239, 0.12) !important', borderLeft: '3px solid var(--accent) !important' },
+        '.cm-debug-current-gutter': { backgroundColor: 'rgba(97, 175, 239, 0.2) !important', color: 'var(--accent) !important' },
+        '.cm-debug-breakpoint-gutter': { cursor: 'pointer' },
         '.cm-selectionBackground': { backgroundColor: 'rgba(0, 80, 200, 0.35) !important' },
         '&.cm-focused .cm-selectionBackground': { backgroundColor: 'rgba(0, 80, 200, 0.35) !important' },
         '.cm-selectionLayer .cm-selectionBackground': { backgroundColor: 'rgba(0, 80, 200, 0.35) !important' },
@@ -585,22 +691,35 @@
 
   onMount(() => {
     mounted = true
-    const filePath = getStoreValue(activeFile)
-    if (filePath) {
-      loadFileContent(filePath)
+    const initialPath = groupId === 'group-1' ? getStoreValue(activeFile) : (getStoreValue(editorGroups).find(g => g.id === groupId)?.activeFile || null)
+    if (initialPath) {
+      loadFileContent(initialPath)
     } else {
       initEditor('')
     }
 
-    activeFileUnsubscribe = activeFile.subscribe((filePath) => {
-      if (!mounted) return
-      if (filePath !== lastFilePath) {
-        lastFilePath = filePath || ''
-        loadFileContent(filePath || '')
-      }
-    })
+    if (groupId === 'group-1') {
+      activeFileUnsubscribe = activeFile.subscribe((filePath) => {
+        if (!mounted) return
+        if (filePath !== lastFilePath) {
+          lastFilePath = filePath || ''
+          loadFileContent(filePath || '')
+        }
+      })
+    } else {
+      activeFileUnsubscribe = editorGroups.subscribe((groups) => {
+        if (!mounted) return
+        const g = groups.find(g => g.id === groupId)
+        const filePath = g?.activeFile || null
+        if (filePath !== lastFilePath) {
+          lastFilePath = filePath || ''
+          loadFileContent(filePath || '')
+        }
+      })
+    }
 
     window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('beforeunload', handleBeforeUnload)
     window.addEventListener('insert-code', handleInsertCode)
 
     // Listen for LSP diagnostics from language servers
@@ -637,10 +756,36 @@
     const onAIFileModified = (/** @type {CustomEvent} */ e) => {
       const modifiedPath = e.detail?.path
       if (!modifiedPath) return
-      // Open the modified file in the editor
-      activeFile.set(modifiedPath)
+      if (groupId === 'group-1') {
+        activeFile.set(modifiedPath)
+      }
     }
     window.addEventListener('ai:file-modified', onAIFileModified)
+
+    gotoLineHandler = (/** @type {CustomEvent} */ e) => {
+      const line = e.detail?.line
+      if (!line || !view) return
+      try {
+        const linePos = view.state.doc.line(Math.min(line, view.state.doc.lines))
+        view.dispatch({ selection: { anchor: linePos.from }, effects: EditorView.scrollIntoView(linePos.from, { y: 'center' }) })
+        view.focus()
+      } catch {}
+    }
+    window.addEventListener('search:goto-line', gotoLineHandler)
+
+    // Debug line highlight
+    let debugStateUnsub = null
+    import('../stores/debug.js').then(({ debugState }) => {
+      debugStateUnsub = debugState.subscribe(state => {
+        if (!view) return
+        const fp = groupId === 'group-1' ? getStoreValue(activeFile) : (getStoreValue(editorGroups).find(g => g.id === groupId)?.activeFile || null)
+        if (state?.status === 'stopped' && state?.file && state.file === fp && state.line > 0) {
+          view.dispatch({ effects: setDebugLine.of(state.line) })
+        } else {
+          view.dispatch({ effects: setDebugLine.of(null) })
+        }
+      })
+    })
 
     function onFileChanged(changedPath) {
       if (!changedPath || !view || changedPath !== lastFilePath) return
@@ -648,13 +793,28 @@
         if (newContent !== null && view) {
           const currentContent = view.state.doc.toString()
           if (newContent !== currentContent) {
-            view.dispatch({
-              changes: { from: 0, to: view.state.doc.length, insert: newContent }
-            })
-            isDirty = false
+            if (isDirty) {
+              conflictNewContent = newContent
+              conflictPending = true
+            } else {
+              view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: newContent } })
+              isDirty = false
+            }
           }
         }
       }).catch(() => {})
+    }
+
+    function resolveConflict(useMine) {
+      if (!view) return
+      if (useMine) {
+        // Keep editor content, discard external changes
+      } else {
+        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: conflictNewContent } })
+        isDirty = false
+      }
+      conflictPending = false
+      conflictNewContent = ''
     }
     // End onFileChanged
 
@@ -687,8 +847,18 @@
     })
   })
 
+  function handleBeforeUnload() {
+    if (isDirty) saveFile()
+  }
+
+  /** @type {((e: CustomEvent) => void)|null} */ let gotoLineHandler = null
+
   onDestroy(() => {
     mounted = false
+    if (autoSaveTimer) { clearTimeout(autoSaveTimer); autoSaveTimer = null }
+    window.removeEventListener('beforeunload', handleBeforeUnload)
+    if (gotoLineHandler) { window.removeEventListener('search:goto-line', gotoLineHandler); gotoLineHandler = null }
+    if (debugStateUnsub) { debugStateUnsub(); debugStateUnsub = null }
     if (activeFileUnsubscribe) {
       activeFileUnsubscribe()
       activeFileUnsubscribe = null
@@ -746,11 +916,11 @@
 </script>
 
 <div class="h-full w-full flex flex-col">
-  {#if $activeFile}
+  {#if groupActiveFile}
     <div class="flex items-center justify-between px-3 py-1 border-b" style="background-color: var(--bg-secondary); border-color: var(--border);">
       <div class="flex items-center gap-2">
         <span class="text-sm" style="color: var(--text-primary);">
-          {$activeFile.split(/[\\/]/).pop()}
+          {groupActiveFile.split(/[\\/]/).pop()}
         </span>
         {#if isDirty}
           <span class="text-xs" style="color: var(--text-secondary);">●</span>
@@ -758,7 +928,7 @@
       </div>
       <div class="flex items-center gap-1">
         <button
-          class="px-2 py-1 rounded text-xs transition-colors hover:bg-dark"
+          class="px-2 py-1 rounded text-xs transition-colors hover:bg-neutral-800"
           style="color: var(--text-secondary);"
           onclick={saveFile}
           title="Ctrl+S"
@@ -780,6 +950,29 @@
     tabindex="0"
     aria-label="Focus editor"
   ></div>
+
+  <!-- File conflict dialog -->
+  {#if conflictPending}
+    <div class="absolute inset-0 z-30 flex items-center justify-center" style="background-color: rgba(0,0,0,0.5);" transition:fade={{ duration: 150 }}>
+      <div class="rounded-lg shadow-xl p-4 max-w-sm w-full" style="background-color: var(--bg-secondary); border: 1px solid var(--border);" transition:scale={{ duration: 200, start: 0.95 }}>
+        <div class="flex items-center gap-2 mb-3">
+          <svg viewBox="0 0 24 24" class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" style="color: var(--warning);">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+          </svg>
+          <span class="text-sm font-medium" style="color: var(--text-primary);">File Modified Externally</span>
+        </div>
+        <p class="text-xs mb-4" style="color: var(--text-secondary);">This file has been modified by another program. You have unsaved changes.</p>
+        <div class="flex gap-2">
+          <button class="flex-1 px-3 py-1.5 text-xs rounded font-medium" style="background-color: var(--accent); color: var(--text-on-accent);" onclick={() => resolveConflict(true)}>
+            Keep Mine
+          </button>
+          <button class="flex-1 px-3 py-1.5 text-xs rounded font-medium" style="background-color: var(--warning); color: var(--bg-primary);" onclick={() => resolveConflict(false)}>
+            Use External
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
 
   <!-- AI Floating Toolbar on selection -->
   {#if aiToolbarVisible && $selectedCode?.trim()}
@@ -812,6 +1005,12 @@
     <button class="context-menu-item" onclick={() => aiAction('generate-test')}>🧪 {$t('editor.ai.generateTest')}</button>
     <button class="context-menu-item" onclick={() => aiAction('generate-doc')}>📝 {$t('editor.ai.generateDoc')}</button>
     <button class="context-menu-item" onclick={() => aiAction('review')}>🔍 {$t('editor.ai.review')}</button>
+  </div>
+{/if}
+
+{#if saveError}
+  <div class="fixed bottom-8 right-4 z-50 px-4 py-2 rounded shadow-lg text-sm" style="background-color: #7f1d1d; color: #fecaca; border: 1px solid #991b1b;">
+    Save failed: {saveError}
   </div>
 {/if}
 

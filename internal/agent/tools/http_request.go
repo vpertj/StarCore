@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"StarCore/internal/agent"
+	"StarCore/internal/sandbox"
 )
 
 const httpMaxBody = 5000
@@ -46,6 +47,11 @@ func (t *HTTPRequestTool) Execute(ctx context.Context, args map[string]any) (str
 	if url == "" {
 		return "", fmt.Errorf("url is required")
 	}
+
+	if err := sandbox.ValidateURL(url); err != nil {
+		return "", fmt.Errorf("SSRF protection: %w", err)
+	}
+
 	method, _ := args["method"].(string)
 	if method == "" {
 		method = "GET"

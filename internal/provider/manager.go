@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"encoding/json"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -41,7 +40,7 @@ func (m *Manager) LoadPersistedConfigs() error {
 	if m.configPath == "" {
 		return nil
 	}
-	data, err := ioutil.ReadFile(m.configPath)
+	data, err := os.ReadFile(m.configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -86,7 +85,7 @@ func (m *Manager) saveConfigs() error {
 	if err != nil {
 		return err
 	}
-	return ioutil.WriteFile(m.configPath, data, 0644)
+	return os.WriteFile(m.configPath, data, 0600)
 }
 
 // getOrCreateProvider returns an existing provider or creates a new one

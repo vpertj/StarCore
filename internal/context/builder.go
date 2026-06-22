@@ -3,7 +3,6 @@ package context
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -27,14 +26,22 @@ type structureCacheEntry struct {
 }
 
 // Builder builds context messages for AI chat requests and manages compression.
+type RAGSearchFunc func(ctx context.Context, projectPath string, query string, topK int) ([]RAGResult, error)
+
+type RAGResult struct {
+	Content string
+	Score   float64
+	Path    string
+}
+
 type Builder struct {
 	providerMgr    *provider.Manager
 	memoryStore    *memory.Store
 	structureMu    sync.RWMutex
 	structureCache map[string]structureCacheEntry
+	ragSearch      RAGSearchFunc
 }
 
-// NewBuilder creates a new context builder.
 func NewBuilder(providerMgr *provider.Manager, memoryStore *memory.Store) *Builder {
 	return &Builder{
 		providerMgr:    providerMgr,
@@ -43,21 +50,93 @@ func NewBuilder(providerMgr *provider.Manager, memoryStore *memory.Store) *Build
 	}
 }
 
-// BuildContextMessage constructs a context message from the chat request.
-func (b *Builder) BuildContextMessage(req provider.ChatRequest) string {
-	var parts []string
+func (b *Builder) SetRAGSearch(fn RAGSearchFunc) {
+	b.ragSearch = fn
+}
 
-	if req.ProjectPath != "" {
-		structure := b.getProjectStructure(req.ProjectPath)
-		if structure != "" {
-			parts = append(parts, "[Project Structure]\nProject root: "+req.ProjectPath+"\n"+structure)
+// BuildContextMessage constructs a context message from the chat request.
+// BuildContextMessage builds the context message with a stable prefix order for maximum cache hits.
+// Order: Rules → Structure → Knowledge → RAG → ContextFiles → ActiveFile → SelectedCode
+// The stable prefix (Rules + Structure) is the same across requests, maximizing OpenAI/Anthropic cache hits.
+func (b *Builder) BuildContextMessage(req provider.ChatRequest) string {
+	var stableParts []string    // Stable prefix — same across requests (cacheable)
+	var dynamicParts []string   // Dynamic suffix — varies per request
+
+	// Dedup: if active file is already in context files, skip it
+	if req.ActiveFile != "" && len(req.ContextFiles) > 0 {
+		for _, fp := range req.ContextFiles {
+			if fp == req.ActiveFile {
+				req.ActiveFile = ""
+				req.ActiveFileContent = ""
+				break
+			}
 		}
 	}
 
+	// === STABLE PREFIX (cacheable) ===
+
+	// 1. Project Rules (most stable — rarely changes)
+	if req.ProjectPath != "" {
+		rules := loadProjectRules(req.ProjectPath)
+		if rules != "" {
+			stableParts = append(stableParts, "[Project Rules]\nThe following project-specific rules apply. Follow these above all other instructions:\n\n"+rules)
+		}
+	}
+
+	// 2. Project Structure (stable — changes rarely)
+	if req.ProjectPath != "" {
+		structure := b.getProjectStructure(req.ProjectPath)
+		if structure != "" {
+			stableParts = append(stableParts, "[Project Structure]\nProject root: "+req.ProjectPath+"\n"+structure)
+		}
+	}
+
+	// 3. Knowledge Base (relatively stable)
+	if req.ProjectPath != "" && b.memoryStore != nil {
+		lastUserMsg := ""
+		for i := len(req.Messages) - 1; i >= 0; i-- {
+			if req.Messages[i].Role == "user" {
+				lastUserMsg = req.Messages[i].Content
+				break
+			}
+		}
+		knowledge := b.injectKnowledge(req.ProjectPath, lastUserMsg)
+		if knowledge != "" {
+			stableParts = append(stableParts, knowledge)
+		}
+
+		// 4. RAG Results (semi-stable)
+		if b.ragSearch != nil && lastUserMsg != "" {
+			results, err := b.ragSearch(context.Background(), req.ProjectPath, lastUserMsg, 3)
+			if err == nil && len(results) > 0 {
+				var ragParts strings.Builder
+				ragParts.WriteString("[Relevant Code Context]\nThe following code snippets are semantically relevant to your query:\n\n")
+				for i, r := range results {
+					if i >= 3 {
+						break
+					}
+					pathInfo := ""
+					if r.Path != "" {
+						pathInfo = fmt.Sprintf(" (from %s, score: %.2f)", r.Path, r.Score)
+					}
+					content := r.Content
+					if len(content) > 2000 {
+						content = content[:2000] + "\n..."
+					}
+					ragParts.WriteString(fmt.Sprintf("---%s\n%s\n\n", pathInfo, content))
+				}
+				stableParts = append(stableParts, ragParts.String())
+			}
+		}
+	}
+
+	// === DYNAMIC SUFFIX (varies per request) ===
+
+	// 5. Context Files (user-selected, varies)
 	if len(req.ContextFiles) > 0 {
 		var fileParts []string
 		for _, fp := range req.ContextFiles {
-			data, err := ioutil.ReadFile(fp)
+			data, err := os.ReadFile(fp)
 			if err != nil {
 				fileParts = append(fileParts, fmt.Sprintf("--- File: %s ---\n[Error reading file: %v]", fp, err))
 				continue
@@ -69,54 +148,69 @@ func (b *Builder) BuildContextMessage(req provider.ChatRequest) string {
 			fileParts = append(fileParts, fmt.Sprintf("--- File: %s ---\n%s", fp, content))
 		}
 		if len(fileParts) > 0 {
-			parts = append(parts, "[Context Files]\nThe following files were referenced by the user:\n\n"+strings.Join(fileParts, "\n\n"))
+			dynamicParts = append(dynamicParts, "[Context Files]\nThe following files were referenced by the user:\n\n"+strings.Join(fileParts, "\n\n"))
 		}
 	}
 
+	// 6. Active File (changes frequently)
 	if req.ActiveFile != "" && req.ActiveFileContent != "" {
 		content := req.ActiveFileContent
 		if len(content) > maxContextFileSize {
 			content = smartTruncate(content, maxContextFileSize)
 		}
-		parts = append(parts, "[Currently Open File]\nFile: "+req.ActiveFile+"\n\n"+content)
+		dynamicParts = append(dynamicParts, "[Currently Open File]\nFile: "+req.ActiveFile+"\n\n"+content)
 	}
 
+	// 7. Selected Code (most volatile)
 	if req.SelectedCode != "" {
-		parts = append(parts, "[Selected Code]\nThe user has selected the following code:\n\n"+req.SelectedCode)
+		dynamicParts = append(dynamicParts, "[Selected Code]\nThe user has selected the following code:\n\n"+req.SelectedCode)
 	}
 
-	if req.ContextCode != "" {
-		parts = append(parts, "[Context Code]\n"+req.ContextCode)
-	}
+	// Combine: stable prefix first, then dynamic suffix
+	allParts := append(stableParts, dynamicParts...)
 
-	// Inject project rules (.starcorerules, .cursorrules, CLAUDE.md) — like Cursor/Claude Code
-	if req.ProjectPath != "" {
-		rules := loadProjectRules(req.ProjectPath)
-		if rules != "" {
-			parts = append(parts, "[Project Rules]\nThe following project-specific rules apply. Follow these above all other instructions:\n\n"+rules)
-		}
-	}
-
-	// Auto-inject knowledge base entries for the project
-	if req.ProjectPath != "" && b.memoryStore != nil {
-		lastUserMsg := ""
-		for i := len(req.Messages) - 1; i >= 0; i-- {
-			if req.Messages[i].Role == "user" {
-				lastUserMsg = req.Messages[i].Content
-				break
-			}
-		}
-		knowledge := b.injectKnowledge(req.ProjectPath, lastUserMsg)
-		if knowledge != "" {
-			parts = append(parts, knowledge)
-		}
-	}
-
-	if len(parts) == 0 {
+	if len(allParts) == 0 {
 		return ""
 	}
 
-	return strings.Join(parts, "\n\n") + "\n\n[End of context. Use the above information to handle the user's request below.]"
+	// Smart trimming: if total context is too large, trim from least important (dynamic suffix)
+	totalLen := 0
+	for _, p := range allParts {
+		totalLen += len(p)
+	}
+
+	// Max context size: ~100K chars (~33K tokens)
+	const maxContextChars = 100000
+	if totalLen > maxContextChars {
+		// Keep stable prefix intact, trim dynamic parts
+		stableLen := 0
+		for _, p := range stableParts {
+			stableLen += len(p)
+		}
+		remaining := maxContextChars - stableLen
+		if remaining < 0 {
+			remaining = 0
+		}
+
+		// Trim dynamic parts from least important (SelectedCode first, then ActiveFile, then ContextFiles)
+		trimmed := make([]string, 0, len(dynamicParts))
+		for i := len(dynamicParts) - 1; i >= 0; i-- {
+			part := dynamicParts[i]
+			if len(part) <= remaining {
+				trimmed = append([]string{part}, trimmed...)
+				remaining -= len(part)
+			} else if remaining > 100 {
+				// Truncate this part
+				trimmed = append([]string{part[:remaining] + "\n... [truncated]"}, trimmed...)
+				remaining = 0
+			}
+			// If remaining <= 100, skip this part entirely
+		}
+
+		allParts = append(stableParts, trimmed...)
+	}
+
+	return strings.Join(allParts, "\n\n") + "\n\n[End of context. Use the above information to handle the user's request below.]"
 }
 
 // GetModelContextWindow estimates the context window size for a model.
@@ -149,7 +243,7 @@ func (b *Builder) AnalyzeProject(projectPath string) (string, error) {
 	var fileContents []string
 	for _, name := range keyFiles {
 		path := filepath.Join(projectPath, name)
-		data, err := ioutil.ReadFile(path)
+		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
 		}
@@ -231,38 +325,42 @@ func (b *Builder) getProjectStructure(projectPath string) string {
 }
 
 func (b *Builder) scanProjectStructure(projectPath string) string {
-	files, err := ioutil.ReadDir(projectPath)
+	entries, err := os.ReadDir(projectPath)
 	if err != nil {
 		return ""
 	}
 	var lines []string
 	dirCount := 0
 	fileCount := 0
-	for _, f := range files {
-		if strings.HasPrefix(f.Name(), ".") && f.Name() != ".gitignore" {
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".") && entry.Name() != ".gitignore" {
 			continue
 		}
-		if f.IsDir() {
-			subFiles, err := ioutil.ReadDir(filepath.Join(projectPath, f.Name()))
+		if entry.IsDir() {
+			subEntries, err := os.ReadDir(filepath.Join(projectPath, entry.Name()))
 			subCount := 0
 			if err == nil {
-				subCount = len(subFiles)
+				subCount = len(subEntries)
 			}
-			lines = append(lines, fmt.Sprintf("  📁 %s/ (%d items)", f.Name(), subCount))
+			lines = append(lines, fmt.Sprintf("  📁 %s/ (%d items)", entry.Name(), subCount))
 			dirCount++
 			if dirCount >= 20 {
 				lines = append(lines, "  ... (more directories)")
 				break
 			}
 		} else {
-			size := f.Size()
+			info, err := entry.Info()
+			var size int64
+			if err == nil {
+				size = info.Size()
+			}
 			sizeStr := ""
 			if size > 1024*1024 {
 				sizeStr = fmt.Sprintf(" (%.1fMB)", float64(size)/1024/1024)
 			} else if size > 1024 {
 				sizeStr = fmt.Sprintf(" (%dKB)", size/1024)
 			}
-			lines = append(lines, fmt.Sprintf("  📄 %s%s", f.Name(), sizeStr))
+			lines = append(lines, fmt.Sprintf("  📄 %s%s", entry.Name(), sizeStr))
 			fileCount++
 			if fileCount >= 30 {
 				lines = append(lines, "  ... (more files)")
@@ -531,7 +629,7 @@ func loadProjectRules(projectPath string) string {
 		filepath.Join(projectPath, "CLAUDE.md"),
 	}
 	for _, p := range paths {
-		data, err := ioutil.ReadFile(p)
+		data, err := os.ReadFile(p)
 		if err == nil {
 			content := string(data)
 			if len(content) > 4000 {
@@ -544,7 +642,7 @@ func loadProjectRules(projectPath string) string {
 }
 
 func detectKeyFiles(projectPath string) []string {
-	entries, err := ioutil.ReadDir(projectPath)
+	entries, err := os.ReadDir(projectPath)
 	if err != nil {
 		return nil
 	}

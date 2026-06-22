@@ -50,13 +50,81 @@ function startSplitResize(e) {
 let hasSplit = $derived($editorGroups.length > 1)
 initCustomModels()
 
+// TODO: Wire up first-run check — show welcome dialog when no AI provider is configured.
+// Currently disabled; there is no isProviderConfigured() check yet.
 let showWelcome = $state(false)
 let welcomeUnsub = null
 
 // Sync editor settings from backend file system (authoritative source)
 onMount(() => {
   initEditorSettings()
+
+  // Debug keyboard shortcuts
+  window.addEventListener('keydown', handleDebugKeys)
+
+  EventsOn('app:session_restore', async (state) => {
+    if (!state?.activeConvId) return
+    try {
+      const { activeConversationId, loadMessages } = await import('./stores/memory.js')
+      activeConversationId.set(state.activeConvId)
+      const msgs = await window.backend.GetMessages(state.activeConvId)
+      if (msgs && msgs.length > 0) {
+        const { messages } = await import('./stores/ai.js')
+        messages.set(msgs.map(m => ({
+          role: m.role,
+          content: m.content,
+          timestamp: new Date(m.createdAt).getTime()
+        })))
+      }
+      if (state.providerId) {
+        const { activeProviderId } = await import('./stores/provider.js')
+        activeProviderId.set(state.providerId)
+      }
+      if (state.model) {
+        const { activeModelId } = await import('./stores/provider.js')
+        activeModelId.set(state.model)
+      }
+      if (state.agentId) {
+        const { activeAgentId } = await import('./stores/agent.js')
+        activeAgentId.set(state.agentId)
+      }
+    } catch (e) {
+      console.error('Failed to restore session:', e)
+    }
+  })
 })
+
+async function handleDebugKeys(e) {
+  if (e.target?.tagName === 'INPUT' || e.target?.tagName === 'TEXTAREA') return
+  const { debugSession, continueDebug, stepOver, stepIn, stepOut, stopDebug } = await import('./stores/debug.js')
+  let session = null
+  debugSession.subscribe(v => session = v)()
+  if (!session && e.key !== 'F5') return
+
+  if (e.key === 'F5' && !e.shiftKey) {
+    e.preventDefault()
+    if (session) await continueDebug()
+    else {
+      const { startDebug } = await import('./stores/debug.js')
+      const { currentProject } = await import('./stores/app.js')
+      let proj = null
+      currentProject.subscribe(v => proj = v)()
+      if (proj) await startDebug(proj)
+    }
+  } else if (e.key === 'F5' && e.shiftKey) {
+    e.preventDefault()
+    await stopDebug()
+  } else if (e.key === 'F10') {
+    e.preventDefault()
+    await stepOver()
+  } else if (e.key === 'F11' && !e.shiftKey) {
+    e.preventDefault()
+    await stepIn()
+  } else if (e.key === 'F11' && e.shiftKey) {
+    e.preventDefault()
+    await stepOut()
+  }
+}
 
 /** @param {WheelEvent} e */
 function handleWheel(e) {
@@ -75,6 +143,7 @@ function handleWheel(e) {
 onDestroy(() => {
   if (welcomeUnsub) { welcomeUnsub(); welcomeUnsub = null }
   document.removeEventListener('wheel', handleWheel)
+  window.removeEventListener('keydown', handleDebugKeys)
 })
 </script>
 
@@ -89,10 +158,10 @@ onDestroy(() => {
       <div class="editor-area-wrapper">
         <div class="editor-split-area">
           <div class="editor-pane" style="flex: {hasSplit ? splitRatio : 1};">
-            <TabBar />
+            <TabBar groupId="group-1" />
             <Breadcrumb filePath={$activeFile || ''} />
             <div class="editor-content">
-              <CodeEditor />
+              <CodeEditor groupId="group-1" />
             </div>
           </div>
 
@@ -105,11 +174,12 @@ onDestroy(() => {
               role="separator"
               aria-orientation="vertical"
             ></div>
+            {@const group2 = $editorGroups.find(g => g.id === 'group-2')}
             <div class="editor-pane" style="flex: {1 - splitRatio};">
-              <TabBar />
-              <Breadcrumb filePath={$activeFile || ''} />
+              <TabBar groupId="group-2" />
+              <Breadcrumb filePath={group2?.activeFile || ''} />
               <div class="editor-content">
-                <CodeEditor />
+                <CodeEditor groupId="group-2" />
               </div>
             </div>
           {/if}
@@ -147,7 +217,7 @@ onDestroy(() => {
         <button class="px-5 py-2 rounded-lg text-sm font-medium transition-all hover:opacity-90" style="background: var(--border); color: var(--text-primary);" onclick={() => showWelcome = false}>
           稍后配置
         </button>
-        <button class="px-5 py-2 rounded-lg text-sm font-medium transition-all hover:opacity-90" style="background: var(--accent); color: #fff;" onclick={() => { showWelcome = false; settingsVisible.set(true); }}>
+        <button class="px-5 py-2 rounded-lg text-sm font-medium transition-all hover:opacity-90" style="background: var(--accent); color: var(--text-on-accent);" onclick={() => { showWelcome = false; settingsVisible.set(true); }}>
           前往配置 →
         </button>
       </div>

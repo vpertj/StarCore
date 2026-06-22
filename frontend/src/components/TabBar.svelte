@@ -1,6 +1,8 @@
 <script>
- import { openedFiles, activeFile, closeFile, togglePinTab, reorderTab } from '../stores/app.js'
+ import { openedFiles, activeFile, closeFile, togglePinTab, reorderTab, editorGroups, setGroupActiveFile } from '../stores/app.js'
  import { t } from '../stores/i18n.js'
+
+ let { groupId = 'group-1' } = $props()
 
  let dragIndex = $state(-1)
 
@@ -46,6 +48,8 @@
    togglePinTab(filePath)
  }
 
+ let groupActiveFile = $derived($editorGroups.find(g => g.id === groupId)?.activeFile || null)
+
  let sortedFiles = $derived(
    $openedFiles.slice().sort((a, b) => {
      if (a.pinned && !b.pinned) return -1
@@ -53,6 +57,15 @@
      return 0
    })
  )
+
+ function activateFile(filePath) {
+   if (groupId === 'group-1') {
+     activeFile.set(filePath)
+   } else {
+
+     setGroupActiveFile(groupId, filePath)
+   }
+ }
 </script>
 
 <div class="flex items-center gap-1 px-2 py-1 border-b overflow-x-auto" style="background-color: var(--bg-tertiary); border-color: var(--border);">
@@ -63,8 +76,8 @@
   {#each sortedFiles as file, i}
     <button
       class="tab-btn"
-      style="background-color: {$activeFile === file.path ? 'var(--bg-primary)' : 'var(--bg-tertiary)'}; color: {$activeFile === file.path ? 'var(--text-primary)' : 'var(--text-secondary)'}"
-      onclick={() => activeFile.set(file.path)}
+      style="background-color: {groupActiveFile === file.path ? 'var(--bg-primary)' : 'var(--bg-tertiary)'}; color: {groupActiveFile === file.path ? 'var(--text-primary)' : 'var(--text-secondary)'}"
+      onclick={() => activateFile(file.path)}
       ondblclick={(e) => handleDblClick(e, file.path)}
       draggable="true"
       ondragstart={(e) => handleDragStart(e, i)}
@@ -115,7 +128,7 @@
 }
 
 .tab-label {
-  max-width: 150px;
+  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -141,7 +154,7 @@
 
 .tab-close:hover {
   opacity: 1 !important;
-  background-color: rgba(255, 255, 255, 0.1);
+  background-color: var(--bg-hover);
   color: var(--text-primary);
 }
 </style>

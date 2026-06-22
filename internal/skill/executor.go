@@ -211,9 +211,9 @@ func (e *Executor) runSkillLoop(ctx context.Context, req provider.ChatRequest, c
 		}
 
 		roundCtx, roundCancel := context.WithTimeout(ctx, 120*time.Second)
-		defer roundCancel()
 		eventCh, err := e.providerMgr.ChatStream(roundCtx, currentReq)
 		if err != nil {
+			roundCancel()
 			ch <- provider.StreamEvent{Type: "error", Content: err.Error()}
 			return
 		}
@@ -231,6 +231,7 @@ func (e *Executor) runSkillLoop(ctx context.Context, req provider.ChatRequest, c
 				ch <- event
 			case "error":
 				ch <- event
+				roundCancel()
 				return
 			case "tool_call":
 				if len(event.ToolCalls) > 0 {
@@ -250,6 +251,7 @@ func (e *Executor) runSkillLoop(ctx context.Context, req provider.ChatRequest, c
 			case "done":
 				if !hasToolCalls {
 					ch <- provider.StreamEvent{Type: "done"}
+					roundCancel()
 					return
 				}
 			}
@@ -259,6 +261,7 @@ func (e *Executor) runSkillLoop(ctx context.Context, req provider.ChatRequest, c
 
 		if !hasToolCalls {
 			ch <- provider.StreamEvent{Type: "done"}
+			roundCancel()
 			return
 		}
 
@@ -306,6 +309,7 @@ func (e *Executor) runSkillLoop(ctx context.Context, req provider.ChatRequest, c
 			}
 		}
 
+		roundCancel()
 	}
 
 	ch <- provider.StreamEvent{Type: "done"}
@@ -332,4 +336,105 @@ func fillTemplate(template string, ctx SkillContext) string {
 		"{input}", ctx.UserInput,
 	)
 	return r.Replace(template)
+}
+
+func (e *Executor) ExecutePipeline(ctx context.Context, pipeline SkillPipeline, skillCtx SkillContext) (*PipelineExecutionResult, error) {
+	result := &PipelineExecutionResult{
+		PipelineID: pipeline.ID,
+		Steps:      make([]PipelineStepResult, 0, len(pipeline.Steps)),
+		Success:    true,
+	}
+
+	var previousOutput string
+
+	for i, step := range pipeline.Steps {
+		stepResult := PipelineStepResult{
+			StepIndex: i,
+			SkillID:   step.SkillID,
+		}
+
+		if step.Condition != "" {
+			if !evaluateCondition(step.Condition, previousOutput, skillCtx) {
+				stepResult.Skipped = true
+				result.Steps = append(result.Steps, stepResult)
+				continue
+			}
+		}
+
+		if step.InputFrom != "" && previousOutput != "" {
+			skillCtx.UserInput = previousOutput
+		}
+
+		_, ok := e.registry.Get(step.SkillID)
+		if !ok {
+			stepResult.Error = fmt.Sprintf("skill %s not found", step.SkillID)
+			result.Steps = append(result.Steps, stepResult)
+			if !step.Optional {
+				result.Success = false
+				result.Error = stepResult.Error
+				return result, fmt.Errorf(stepResult.Error)
+			}
+			continue
+		}
+
+		eventCh, err := e.Execute(ctx, step.SkillID, skillCtx, "", "")
+		if err != nil {
+			stepResult.Error = err.Error()
+			result.Steps = append(result.Steps, stepResult)
+			if !step.Optional {
+				result.Success = false
+				result.Error = err.Error()
+				return result, err
+			}
+			continue
+		}
+
+		var content strings.Builder
+		for event := range eventCh {
+			if event.Type == "data" {
+				content.WriteString(event.Content)
+			} else if event.Type == "error" {
+				stepResult.Error = event.Content
+				break
+			}
+		}
+
+		sr := &SkillResult{
+			SkillID:    step.SkillID,
+			Content:    content.String(),
+			ResultType: "text",
+		}
+		stepResult.Result = sr
+		previousOutput = sr.Content
+		result.Steps = append(result.Steps, stepResult)
+
+		if e.memoryStore != nil && skillCtx.ProjectPath != "" {
+			go e.memoryStore.SaveKnowledge(&memory.Knowledge{
+				ID:          fmt.Sprintf("skill_pipe_%s_%d_%d", pipeline.ID, i, time.Now().UnixNano()),
+				ProjectPath: skillCtx.ProjectPath,
+				Category:    "skill_pipeline",
+				Key:         fmt.Sprintf("%s_step_%d", pipeline.ID, i),
+				Value:       sr.Content,
+				Source:      "auto",
+				UpdatedAt:   time.Now().Format(time.RFC3339),
+			})
+		}
+	}
+
+	return result, nil
+}
+
+func evaluateCondition(condition string, previousOutput string, ctx SkillContext) bool {
+	switch condition {
+	case "has_errors":
+		return len(ctx.Diagnostics) > 0
+	case "no_errors":
+		return len(ctx.Diagnostics) == 0
+	case "has_code":
+		return ctx.SelectedCode != ""
+	case "has_previous_output":
+		return previousOutput != ""
+	default:
+		return true
+	}
 }

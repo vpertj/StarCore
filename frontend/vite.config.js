@@ -9,6 +9,10 @@ export default defineConfig({
       '@': '/src'
     }
   },
+  test: {
+    globals: true,
+    environment: 'jsdom',
+  },
   build: {
     chunkSizeWarningLimit: 800,
     rollupOptions: {

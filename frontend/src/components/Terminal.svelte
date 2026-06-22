@@ -309,7 +309,7 @@
 .exited-icon {
   width: 16px;
   height: 16px;
-  color: #f14c4c;
+  color: var(--error);
   flex-shrink: 0;
 }
 

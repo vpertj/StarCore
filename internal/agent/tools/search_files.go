@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -153,7 +152,7 @@ func searchWithGo(ctx context.Context, query, rootPath, includePattern string, c
 				return nil
 			}
 		}
-		content, err := ioutil.ReadFile(path)
+		content, err := os.ReadFile(path)
 		if err != nil {
 			return nil
 		}

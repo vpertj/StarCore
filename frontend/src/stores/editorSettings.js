@@ -17,6 +17,9 @@ const defaults = {
   cursorStyle: 'block',
   cursorBlinkStyle: 'blink',
   cursorHeight: 100,
+  autoSave: true,
+  autoSaveDelay: 1000,
+  formatOnSave: true,
 }
 
 /**

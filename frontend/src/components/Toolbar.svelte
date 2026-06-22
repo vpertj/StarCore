@@ -160,7 +160,7 @@ onDestroy(() => {
 
     <button
       class="toolbar-btn"
-      style="background-color: {$bottomPanelVisible && $bottomPanelTab === 'terminal' ? '#ffffff10' : 'transparent'}; color: {$bottomPanelVisible && $bottomPanelTab === 'terminal' ? 'var(--text-primary)' : 'var(--text-secondary)'}"
+      style="background-color: {$bottomPanelVisible && $bottomPanelTab === 'terminal' ? 'var(--bg-hover)' : 'transparent'}; color: {$bottomPanelVisible && $bottomPanelTab === 'terminal' ? 'var(--text-primary)' : 'var(--text-secondary)'}"
       onclick={toggleTerminal}
     >
       <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -171,7 +171,7 @@ onDestroy(() => {
 
     <button
       class="toolbar-btn"
-      style="background-color: {$aiPanelVisible ? '#ffffff10' : 'transparent'}; color: {$aiPanelVisible ? 'var(--text-primary)' : 'var(--text-secondary)'}"
+      style="background-color: {$aiPanelVisible ? 'var(--bg-hover)' : 'transparent'}; color: {$aiPanelVisible ? 'var(--text-primary)' : 'var(--text-secondary)'}"
       onclick={toggleAIPanel}
     >
       <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -249,7 +249,7 @@ onDestroy(() => {
   border-radius: 4px;
   font-size: 11px;
   color: var(--text-secondary);
-  background-color: #ffffff08;
+  background-color: var(--bg-hover);
   max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -275,7 +275,7 @@ onDestroy(() => {
 }
 
 .toolbar-btn:hover {
-  background-color: #ffffff10 !important;
+  background-color: var(--bg-hover) !important;
 }
 
 .window-controls {
@@ -297,12 +297,12 @@ onDestroy(() => {
 }
 
 .win-btn:hover {
-  background-color: #ffffff10;
+  background-color: var(--bg-hover);
   color: var(--text-primary);
 }
 
 .win-btn-close:hover {
   background-color: #e81123;
-  color: #ffffff;
+  color: var(--text-on-accent);
 }
 </style>

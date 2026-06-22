@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -19,17 +18,27 @@ import (
 	"StarCore/internal/agent/builtins"
 	agentTools "StarCore/internal/agent/tools"
 	"StarCore/internal/ai"
-	ictx "StarCore/internal/context"
+	"StarCore/internal/codescan"
+	"StarCore/internal/completion"
+	ictx 	"StarCore/internal/context"
+	"StarCore/internal/debug"
+	"StarCore/internal/extension"
 	"StarCore/internal/files"
 	iggit "StarCore/internal/git"
 	"StarCore/internal/lsp"
 	"StarCore/internal/mcp"
 	"StarCore/internal/memory"
+	"StarCore/internal/pipeline"
 	"StarCore/internal/provider"
+	"StarCore/internal/rag"
+	"StarCore/internal/remote"
+	"StarCore/internal/sandbox"
 	"StarCore/internal/skill"
 	skillBuiltins "StarCore/internal/skill/builtins"
 	"StarCore/internal/terminal"
+	"StarCore/internal/verify"
 	"StarCore/internal/watcher"
+	"StarCore/internal/workspace"
 
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -42,6 +51,10 @@ type (
 	SearchOptions  = files.SearchOptions
 	GitStatusEntry = iggit.StatusEntry
 	GitLogEntry    = iggit.LogEntry
+	WorkspaceRoot  = workspace.WorkspaceRoot
+	Extension      = extension.Extension
+	ExtCommand     = extension.CommandContribution
+	RemoteConn     = remote.Connection
 )
 
 // ApplyDiffRequest is the request payload for the ApplyDiff method.
@@ -70,7 +83,7 @@ func configDir() string {
 		d, _ = os.Getwd()
 	}
 	d = filepath.Join(d, "StarCore")
-	os.MkdirAll(d, 0755)
+	_ = os.MkdirAll(d, 0755)
 	return d
 }
 
@@ -86,13 +99,26 @@ type App struct {
 	toolExec    *agent.ToolExecutor
 	mcpMgr      *mcp.ServerManager
 	lspMgr      *lsp.Manager
-	fileWatcher *watcher.Watcher
+
+	fileWatchers   map[string]*watcher.Watcher
+	sandboxConfigs map[string]*sandbox.Config
+	activeProject  string
+	openProjects   []string
 
 	aiService      *ai.Service
 	contextBuilder *ictx.Builder
 	terminalMgr    *terminal.Manager
 	fileService    *files.Service
 	gitService     *iggit.Service
+	pipelineExec   *pipeline.Executor
+	completionSvc  *completion.Service
+	ragSvc         *rag.Service
+	verifySvc      *verify.Service
+	codeScanEngine *codescan.RuleEngine
+	workspaceMgr   *workspace.Manager
+	extRegistry    *extension.Registry
+	remoteMgr      *remote.Manager
+	debugMgr       *debug.Manager
 }
 
 // ------- Constructor -------
@@ -171,7 +197,12 @@ func NewApp() *App {
 	app.toolExec = toolExec
 	app.mcpMgr = mcpMgr
 	app.lspMgr = lspMgr
-	app.fileWatcher = watcher.New("")
+	app.fileWatchers = make(map[string]*watcher.Watcher)
+	app.sandboxConfigs = make(map[string]*sandbox.Config)
+	app.workspaceMgr = workspace.NewManager()
+	app.extRegistry = extension.NewRegistry(dataDir)
+	app.remoteMgr = remote.NewManager()
+	app.debugMgr = debug.NewManager(app.emit)
 
 	app.loadCustomLSPServers()
 
@@ -189,7 +220,16 @@ func NewApp() *App {
 		app.contextBuilder.SummarizeAndCompressWithFlag,
 		app.contextBuilder.GetModelContextWindow,
 		func() context.Context { return app.ctx },
+		app.autoVerify,
 	)
+
+	app.pipelineExec = pipeline.NewExecutor(mgr, toolExec, reg, memStore, app.emit)
+	app.completionSvc = completion.NewService(mgr)
+	app.ragSvc = rag.NewService(mgr)
+	app.verifySvc = verify.NewService("")
+	app.codeScanEngine = codescan.NewRuleEngine()
+
+	sandbox.InitAuditLogger(dataDir)
 
 	return app
 }
@@ -209,8 +249,39 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.terminalMgr = terminal.NewManager(a.emit, ctx.Done())
 	a.lspMgr.SetContext(ctx)
-	a.fileWatcher.SetContext(ctx)
+	for _, w := range a.fileWatchers {
+		w.SetContext(ctx)
+	}
 	go a.mcpMgr.StartAll(context.Background())
+
+	crashed, crashedAt := memory.CheckAndClearCrashMarker(configDir())
+	if crashed {
+		a.emit("app:crash_recovery", map[string]interface{}{
+			"crashedAt": crashedAt,
+			"message":   "StarCore 上次异常退出，已自动恢复。您最近的对话已保留。",
+		})
+	}
+
+	if a.memoryStore != nil {
+		if state, err := a.memoryStore.LoadSessionState(); err == nil && state != nil {
+			a.emit("app:session_restore", map[string]interface{}{
+				"activeConvId": state.ActiveConvID,
+				"projectPath":  state.ProjectPath,
+				"agentId":      state.AgentID,
+				"mode":         state.Mode,
+				"providerId":   state.ProviderID,
+				"model":        state.Model,
+				"crashed":      crashed,
+			})
+		}
+	}
+
+	go func() {
+		for {
+			time.Sleep(30 * time.Second)
+			memory.SaveCrashMarker(configDir())
+		}
+	}()
 
 	// Check if this is a first run (no providers configured)
 	providers := a.providerMgr.GetProviders()
@@ -231,6 +302,29 @@ func (a *App) startup(ctx context.Context) {
 	}
 }
 
+// shutdown is called by Wails when the application is closing.
+func (a *App) shutdown(ctx context.Context) {
+	// Stop all debug sessions
+	if a.debugMgr != nil {
+		a.debugMgr.StopAll()
+	}
+
+	// Stop all LSP servers
+	if a.lspMgr != nil {
+		a.lspMgr.Shutdown()
+	}
+
+	// Stop all file watchers
+	for _, w := range a.fileWatchers {
+		w.Stop()
+	}
+
+	// Stop MCP servers
+	if a.mcpMgr != nil {
+		a.mcpMgr.StopAll()
+	}
+}
+
 // IsProviderConfigured checks if any AI provider has been set up.
 func (a *App) IsProviderConfigured() bool {
 	for _, p := range a.providerMgr.GetProviders() {
@@ -243,10 +337,138 @@ func (a *App) IsProviderConfigured() bool {
 
 // SetProjectPath starts file watching on the given path.
 func (a *App) SetProjectPath(path string) {
-	a.fileWatcher.Stop()
-	a.fileWatcher = watcher.New(path)
-	a.fileWatcher.SetContext(a.ctx)
-	a.fileWatcher.Start(2 * time.Second)
+	if path == "" {
+		return
+	}
+	// Add to open projects if not already present
+	found := false
+	for _, p := range a.openProjects {
+		if p == path {
+			found = true
+			break
+		}
+	}
+	if !found {
+		a.openProjects = append(a.openProjects, path)
+	}
+
+	// Create watcher for this project if not already exists
+	if _, exists := a.fileWatchers[path]; !exists {
+		w := watcher.New(path)
+		w.SetContext(a.ctx)
+		w.Start(2 * time.Second)
+		a.fileWatchers[path] = w
+	}
+
+	// Set sandbox config for this project
+	cfg := sandbox.DefaultConfig(path)
+	a.sandboxConfigs[path] = cfg
+	agentTools.SandboxConfig = cfg
+
+	a.activeProject = path
+	a.verifySvc.SetProjectDir(path)
+	a.lspMgr.SetRootPath(path)
+	a.workspaceMgr.AddRoot(path)
+	a.workspaceMgr.SetActive(path)
+}
+
+// AddWorkspaceRoot adds an additional root to the workspace.
+func (a *App) AddWorkspaceRoot(path string) {
+	a.workspaceMgr.AddRoot(path)
+}
+
+// RemoveWorkspaceRoot removes a root from the workspace.
+func (a *App) RemoveWorkspaceRoot(path string) {
+	a.workspaceMgr.RemoveRoot(path)
+}
+
+// SetActiveWorkspaceRoot sets the active workspace root.
+func (a *App) SetActiveWorkspaceRoot(path string) {
+	a.workspaceMgr.SetActive(path)
+}
+
+// SwitchProject changes the active project without destroying others.
+func (a *App) SwitchProject(path string) {
+	a.activeProject = path
+	if cfg, ok := a.sandboxConfigs[path]; ok {
+		agentTools.SandboxConfig = cfg
+	}
+	a.verifySvc.SetProjectDir(path)
+	a.lspMgr.SetRootPath(path)
+	a.workspaceMgr.SetActive(path)
+	a.emit("project:switched", map[string]interface{}{"path": path})
+}
+
+// GetOpenProjects returns all open project paths.
+func (a *App) GetOpenProjects() []string {
+	return a.openProjects
+}
+
+// CloseProject cleans up a specific project's resources.
+func (a *App) CloseProject(path string) {
+	if w, ok := a.fileWatchers[path]; ok {
+		w.Stop()
+		delete(a.fileWatchers, path)
+	}
+	a.terminalMgr.KillByProject(path)
+	delete(a.sandboxConfigs, path)
+	newProjects := make([]string, 0, len(a.openProjects)-1)
+	for _, p := range a.openProjects {
+		if p != path {
+			newProjects = append(newProjects, p)
+		}
+	}
+	a.openProjects = newProjects
+	if a.activeProject == path && len(a.openProjects) > 0 {
+		a.SwitchProject(a.openProjects[0])
+	} else if len(a.openProjects) == 0 {
+		a.activeProject = ""
+	}
+}
+
+// GetWorkspaceRoots returns all workspace roots.
+func (a *App) GetWorkspaceRoots() []workspace.WorkspaceRoot {
+	return a.workspaceMgr.Roots()
+}
+
+// GetExtensions returns all registered extensions.
+func (a *App) GetExtensions() []extension.Extension {
+	return a.extRegistry.List()
+}
+
+// GetExtensionCommands returns all extension-contributed commands.
+func (a *App) GetExtensionCommands() []extension.CommandContribution {
+	return a.extRegistry.GetCommands()
+}
+
+// SetExtensionEnabled enables or disables an extension.
+func (a *App) SetExtensionEnabled(id string, enabled bool) error {
+	return a.extRegistry.SetEnabled(id, enabled)
+}
+
+// AddRemoteConnection adds a remote development connection.
+func (a *App) AddRemoteConnection(conn remote.Connection) error {
+	return a.remoteMgr.AddConnection(conn)
+}
+
+// RemoveRemoteConnection removes a remote connection.
+func (a *App) RemoveRemoteConnection(id string) {
+	a.remoteMgr.RemoveConnection(id)
+}
+
+// ListRemoteConnections returns all remote connections.
+func (a *App) ListRemoteConnections() []remote.Connection {
+	return a.remoteMgr.ListConnections()
+}
+
+// ConnectRemote establishes a remote connection.
+func (a *App) ConnectRemote(id string) error {
+	return a.remoteMgr.Connect(a.ctx, id)
+}
+
+// DisconnectRemote closes a remote connection.
+func (a *App) DisconnectRemote(id string) {
+	a.remoteMgr.Disconnect(id)
 }
 
 // ------- Window controls -------
@@ -266,16 +488,11 @@ func (a *App) CloseWindow() {
 	wailsRuntime.Quit(a.ctx)
 }
 
-// Greet returns a greeting message.
-func (a *App) Greet(name string) string {
-	return fmt.Sprintf("Hello %s, It's show time!", name)
-}
-
 // ------- Terminal (delegates to terminal.Manager) -------
 
 // NewTerminal creates a new terminal session.
 func (a *App) NewTerminal(cwd string) (string, error) {
-	return a.terminalMgr.New(cwd)
+	return a.terminalMgr.New(cwd, a.activeProject)
 }
 
 // ConnectTerminal connects the frontend to a buffered terminal session.
@@ -285,7 +502,7 @@ func (a *App) ConnectTerminal(id string) error {
 
 // StartTerminal creates a new terminal (convenience wrapper).
 func (a *App) StartTerminal(cwd string) error {
-	_, err := a.terminalMgr.New(cwd)
+	_, err := a.terminalMgr.New(cwd, a.activeProject)
 	return err
 }
 
@@ -307,6 +524,106 @@ func (a *App) KillTerminal(id string) error {
 // ListTerminals returns all active terminal sessions.
 func (a *App) ListTerminals() []map[string]interface{} {
 	return a.terminalMgr.List()
+}
+
+// ListTerminalsByProject returns active terminal sessions for a specific project.
+func (a *App) ListTerminalsByProject(projectPath string) []map[string]interface{} {
+	return a.terminalMgr.ListByProject(projectPath)
+}
+
+// ------- Debug (delegates to debug.Manager) -------
+
+// DebugStart starts a new debug session for the given Go program.
+func (a *App) DebugStart(programPath string, args []string) (map[string]interface{}, error) {
+	session, err := a.debugMgr.Start(programPath, args)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"id":      session.ID,
+		"program": session.ProgramPath,
+		"port":    session.Port,
+	}, nil
+}
+
+// DebugStop stops a debug session.
+func (a *App) DebugStop(sessionID string) error {
+	return a.debugMgr.Stop(sessionID)
+}
+
+// DebugList returns all active debug sessions.
+func (a *App) DebugList() []map[string]interface{} {
+	return a.debugMgr.List()
+}
+
+// DebugAddBreakpoint sets a breakpoint at the specified file and line.
+func (a *App) DebugAddBreakpoint(sessionID string, file string, line int, condition string) (*debug.Breakpoint, error) {
+	return a.debugMgr.AddBreakpoint(sessionID, file, line, condition)
+}
+
+// DebugAddBreakpointByFunc sets a breakpoint at the specified function.
+func (a *App) DebugAddBreakpointByFunc(sessionID string, function string) (*debug.Breakpoint, error) {
+	return a.debugMgr.AddBreakpointByFunc(sessionID, function)
+}
+
+// DebugRemoveBreakpoint removes a breakpoint by ID.
+func (a *App) DebugRemoveBreakpoint(sessionID string, bpID int) error {
+	return a.debugMgr.RemoveBreakpoint(sessionID, bpID)
+}
+
+// DebugListBreakpoints returns all breakpoints for a session.
+func (a *App) DebugListBreakpoints(sessionID string) ([]debug.Breakpoint, error) {
+	return a.debugMgr.ListBreakpoints(sessionID)
+}
+
+// DebugContinue resumes program execution.
+func (a *App) DebugContinue(sessionID string) error {
+	return a.debugMgr.Continue(sessionID)
+}
+
+// DebugStepOver steps over the current line.
+func (a *App) DebugStepOver(sessionID string) error {
+	return a.debugMgr.StepOver(sessionID)
+}
+
+// DebugStepIn steps into the current function.
+func (a *App) DebugStepIn(sessionID string) error {
+	return a.debugMgr.StepIn(sessionID)
+}
+
+// DebugStepOut steps out of the current function.
+func (a *App) DebugStepOut(sessionID string) error {
+	return a.debugMgr.StepOut(sessionID)
+}
+
+// DebugGetState returns the current debug state.
+func (a *App) DebugGetState(sessionID string) (*debug.SessionState, error) {
+	return a.debugMgr.GetState(sessionID)
+}
+
+// DebugGetVariable evaluates an expression and returns its value.
+func (a *App) DebugGetVariable(sessionID string, frameID int, expr string) (*debug.Variable, error) {
+	return a.debugMgr.GetVariable(sessionID, frameID, expr)
+}
+
+// DebugRestart restarts the debug session.
+func (a *App) DebugRestart(sessionID string) error {
+	return a.debugMgr.Restart(sessionID)
+}
+
+// DebugDetach detaches from the debug session without killing the program.
+func (a *App) DebugDetach(sessionID string) error {
+	return a.debugMgr.Detach(sessionID)
+}
+
+// DebugConsoleExecute executes a debug console command.
+func (a *App) DebugConsoleExecute(sessionID string, expr string) (*debug.ConsoleResult, error) {
+	return a.debugMgr.ConsoleExecute(sessionID, expr)
+}
+
+// DebugCheckDlv checks if dlv is installed and returns its version.
+func (a *App) DebugCheckDlv() (bool, string) {
+	return debug.CheckDlvInstalled()
 }
 
 // ------- File operations (delegates to files.Service) -------
@@ -335,6 +652,11 @@ func (a *App) ReadFile(path string) (string, error) {
 // WriteFile writes content to a file.
 func (a *App) WriteFile(path string, content string) error {
 	return a.fileService.WriteFile(path, content)
+}
+
+// FormatFile formats a file using the appropriate formatter.
+func (a *App) FormatFile(path string) (string, error) {
+	return a.fileService.FormatFile(path)
 }
 
 // CreateFile creates an empty file.
@@ -436,7 +758,37 @@ func (a *App) GitPush(projectPath string) (string, error) {
 
 // GitFetch fetches from the remote.
 func (a *App) GitFetch(projectPath string) (string, error) {
-	return a.gitService.Fetch(projectPath)
+	return a.gitService.FetchRemote(projectPath, "")
+}
+
+// GitBlame returns per-line blame information for a file.
+func (a *App) GitBlame(projectPath string, filePath string) ([]iggit.BlameLine, error) {
+	return a.gitService.Blame(projectPath, filePath)
+}
+
+// GitVisualDiff returns a unified diff for a file.
+func (a *App) GitVisualDiff(projectPath string, filePath string) (string, error) {
+	return a.gitService.VisualDiff(projectPath, filePath)
+}
+
+// GitDiffBetween returns diff between two refs for a file.
+func (a *App) GitDiffBetween(projectPath string, from string, to string, filePath string) (string, error) {
+	return a.gitService.DiffBetween(projectPath, from, to, filePath)
+}
+
+// GitRemoteList returns configured remotes.
+func (a *App) GitRemoteList(projectPath string) (string, error) {
+	return a.gitService.RemoteList(projectPath)
+}
+
+// GitLogFile returns commit history for a specific file.
+func (a *App) GitLogFile(projectPath string, filePath string, count int) ([]iggit.LogEntry, error) {
+	return a.gitService.LogFile(projectPath, filePath, count)
+}
+
+// GitConflictFiles returns files with merge conflicts.
+func (a *App) GitConflictFiles(projectPath string) ([]string, error) {
+	return a.gitService.ConflictFiles(projectPath)
 }
 
 // GitCheckout switches to a branch.
@@ -537,20 +889,32 @@ func (a *App) GetSkills() []skill.SkillDef {
 // SaveSkill saves a skill as a SKILL.md file in the skills directory.
 func (a *App) SaveSkill(s skill.SkillDef) error {
 	dir := skill.GetSkillsDir(configDir())
-	skillDir := filepath.Join(dir, s.ID)
-	os.MkdirAll(skillDir, 0755)
+	resolved := filepath.Join(dir, s.ID)
+	if !strings.HasPrefix(filepath.Clean(resolved), filepath.Clean(dir)+string(filepath.Separator)) {
+		return fmt.Errorf("invalid skill ID")
+	}
+	if err := os.MkdirAll(resolved, 0755); err != nil {
+		return fmt.Errorf("创建技能目录失败: %w", err)
+	}
 	content := skill.BuildSkillMarkdown(s)
-	return ioutil.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0644)
+	return os.WriteFile(filepath.Join(resolved, "SKILL.md"), []byte(content), 0644)
 }
 
 // DeleteSkill removes a skill from the filesystem.
 func (a *App) DeleteSkill(skillID string) error {
 	dir := skill.GetSkillsDir(configDir())
-	return os.RemoveAll(filepath.Join(dir, skillID))
+	resolved := filepath.Join(dir, skillID)
+	if !strings.HasPrefix(filepath.Clean(resolved), filepath.Clean(dir)+string(filepath.Separator)) {
+		return fmt.Errorf("invalid skill ID")
+	}
+	return os.RemoveAll(resolved)
 }
 
 // InstallSkillFromURL fetches a SKILL.md from a URL and installs it.
 func (a *App) InstallSkillFromURL(url string) error {
+	if err := sandbox.ValidateURL(url); err != nil {
+		return fmt.Errorf("URL验证失败: %w", err)
+	}
 	resp, err := http.Get(url)
 	if err != nil {
 		return fmt.Errorf("下载失败: %w", err)
@@ -559,7 +923,7 @@ func (a *App) InstallSkillFromURL(url string) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("下载失败: HTTP %d", resp.StatusCode)
 	}
-	data, err := ioutil.ReadAll(io.LimitReader(resp.Body, 50000))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 50000))
 	if err != nil {
 		return fmt.Errorf("读取失败: %w", err)
 	}
@@ -582,8 +946,10 @@ func (a *App) InstallSkillFromURL(url string) error {
 	}
 	dir := skill.GetSkillsDir(configDir())
 	skillDir := filepath.Join(dir, id)
-	os.MkdirAll(skillDir, 0755)
-	return ioutil.WriteFile(filepath.Join(skillDir, "SKILL.md"), data, 0644)
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		return fmt.Errorf("create skill dir: %w", err)
+	}
+	return os.WriteFile(filepath.Join(skillDir, "SKILL.md"), data, 0644)
 }
 
 func parseSkillFrontmatter(content string) (map[string]string, string) {
@@ -773,6 +1139,32 @@ func (a *App) ClearTokenUsage() error {
 	return a.memoryStore.ClearTokenUsage()
 }
 
+// ------- Session State -------
+
+// SaveSessionState persists the active session state for crash recovery.
+func (a *App) SaveSessionState(state memory.SessionState) error {
+	if a.memoryStore == nil {
+		return nil
+	}
+	return a.memoryStore.SaveSessionState(&state)
+}
+
+// LoadSessionState returns the last saved session state.
+func (a *App) LoadSessionState() (*memory.SessionState, error) {
+	if a.memoryStore == nil {
+		return nil, nil
+	}
+	return a.memoryStore.LoadSessionState()
+}
+
+// GetRecentConversations returns recent conversations for a project.
+func (a *App) GetRecentConversations(projectPath string, limit int) ([]memory.Conversation, error) {
+	if a.memoryStore == nil {
+		return nil, nil
+	}
+	return a.memoryStore.GetRecentConversations(projectPath, limit)
+}
+
 // ------- MCP -------
 
 // GetMCPServers returns all MCP server configurations.
@@ -847,6 +1239,38 @@ func (a *App) LSPShutdown() {
 	a.lspMgr.Shutdown()
 }
 
+func (a *App) LSPRename(filePath string, line int, col int, newName string) (*lsp.RenameResult, error) {
+	return a.lspMgr.Rename(filePath, line, col, newName)
+}
+
+func (a *App) LSPFormatting(filePath string) ([]lsp.TextEdit, error) {
+	return a.lspMgr.Formatting(filePath)
+}
+
+func (a *App) LSPSignatureHelp(filePath string, line int, col int) (*lsp.SignatureHelp, error) {
+	return a.lspMgr.SignatureHelp(filePath, line, col)
+}
+
+func (a *App) LSPWorkspaceSymbols(query string) ([]lsp.WorkspaceSymbol, error) {
+	return a.lspMgr.WorkspaceSymbols(query)
+}
+
+func (a *App) LSPCodeLens(filePath string) ([]lsp.CodeLens, error) {
+	return a.lspMgr.GetCodeLens(filePath)
+}
+
+func (a *App) LSPInlayHints(filePath string, startLine, startCol, endLine, endCol int) ([]lsp.InlayHint, error) {
+	return a.lspMgr.GetInlayHints(filePath, startLine, startCol, endLine, endCol)
+}
+
+func (a *App) LSPDocumentSymbols(filePath string) ([]lsp.DocumentSymbol, error) {
+	return a.lspMgr.GetDocumentSymbols(filePath)
+}
+
+func (a *App) LSPFoldingRanges(filePath string) ([]lsp.FoldingRange, error) {
+	return a.lspMgr.GetFoldingRanges(filePath)
+}
+
 // GetLSPServers returns all registered LSP server configurations.
 func (a *App) GetLSPServers() []lsp.FrontendServerInfo {
 	return a.lspMgr.ListServers()
@@ -877,12 +1301,12 @@ func (a *App) saveCustomLSPServers() error {
 		return err
 	}
 	configPath := filepath.Join(configDir(), "lsp_servers.json")
-	return ioutil.WriteFile(configPath, data, 0644)
+	return os.WriteFile(configPath, data, 0644)
 }
 
 func (a *App) loadCustomLSPServers() {
 	configPath := filepath.Join(configDir(), "lsp_servers.json")
-	data, err := ioutil.ReadFile(configPath)
+	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return
 	}
@@ -908,13 +1332,16 @@ func (a *App) InstallLanguagePackage(pkgID string) (string, error) {
 		}
 		if pkg.DownloadURL != "" {
 			binDir := filepath.Join(configDir(), "bin")
-			os.MkdirAll(binDir, 0755)
+			if err := os.MkdirAll(binDir, 0755); err != nil {
+				return "", fmt.Errorf("创建目录失败: %w", err)
+			}
 			targetPath := filepath.Join(binDir, pkg.DownloadFile)
 			if _, err := os.Stat(targetPath); err == nil {
 				return "已安装: " + targetPath, nil
 			}
 			tmpPath := targetPath + ".tmp"
-			resp, err := http.Get(pkg.DownloadURL)
+			client := &http.Client{Timeout: 5 * time.Minute}
+			resp, err := client.Get(pkg.DownloadURL)
 			if err != nil {
 				return "", fmt.Errorf("下载失败: %w", err)
 			}
@@ -926,12 +1353,17 @@ func (a *App) InstallLanguagePackage(pkgID string) (string, error) {
 			if err != nil {
 				return "", fmt.Errorf("创建文件失败: %w", err)
 			}
-			if _, err := io.Copy(f, resp.Body); err != nil {
+			written, err := io.Copy(f, io.LimitReader(resp.Body, 100*1024*1024))
+			if err != nil {
 				f.Close()
 				os.Remove(tmpPath)
 				return "", fmt.Errorf("写入失败: %w", err)
 			}
 			f.Close()
+			if written >= 100*1024*1024 {
+				os.Remove(tmpPath)
+				return "", fmt.Errorf("下载文件超过100MB限制")
+			}
 			if strings.HasSuffix(pkg.DownloadURL, ".gz") {
 				if err := decompressGz(tmpPath, targetPath); err != nil {
 					os.Remove(tmpPath)
@@ -939,9 +1371,14 @@ func (a *App) InstallLanguagePackage(pkgID string) (string, error) {
 				}
 				os.Remove(tmpPath)
 			} else {
-				os.Rename(tmpPath, targetPath)
+				if err := os.Rename(tmpPath, targetPath); err != nil {
+					os.Remove(tmpPath)
+					return "", fmt.Errorf("重命名失败: %w", err)
+				}
 			}
-			os.Chmod(targetPath, 0755)
+			if err := os.Chmod(targetPath, 0755); err != nil {
+				return "", fmt.Errorf("设置权限失败: %w", err)
+			}
 			return "安装完成: " + targetPath, nil
 		}
 		if pkg.InstallCmd != "" {
@@ -962,7 +1399,7 @@ func decompressGz(src, dst string) error {
 		return err
 	}
 	defer f.Close()
-	gz, err := ioutil.ReadAll(f)
+	gz, err := io.ReadAll(f)
 	if err != nil {
 		return err
 	}
@@ -1001,7 +1438,7 @@ func (a *App) GetProxy() (string, string) {
 
 // ReadFileWithLSP reads a file and notifies LSP that it's opened.
 func (a *App) ReadFileWithLSP(path string) (string, error) {
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
@@ -1012,7 +1449,7 @@ func (a *App) ReadFileWithLSP(path string) (string, error) {
 
 // WriteFileWithLSP writes a file and notifies LSP of the change.
 func (a *App) WriteFileWithLSP(path string, content string) error {
-	err := ioutil.WriteFile(path, []byte(content), 0644)
+	err := os.WriteFile(path, []byte(content), 0644)
 	if err == nil {
 		a.lspMgr.DidChange(path, content)
 	}
@@ -1037,14 +1474,14 @@ func (a *App) GetProjectAnalysis(projectPath string) (string, error) {
 // This is the authoritative store — localStorage is only a fast cache.
 func (a *App) SaveEditorSettings(settingsJSON string) error {
 	configPath := filepath.Join(configDir(), "editor_settings.json")
-	return ioutil.WriteFile(configPath, []byte(settingsJSON), 0644)
+	return os.WriteFile(configPath, []byte(settingsJSON), 0644)
 }
 
 // LoadEditorSettings loads editor settings from the config directory.
 // Returns empty string if the file doesn't exist (first run).
 func (a *App) LoadEditorSettings() (string, error) {
 	configPath := filepath.Join(configDir(), "editor_settings.json")
-	data, err := ioutil.ReadFile(configPath)
+	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", nil
@@ -1063,13 +1500,13 @@ func (a *App) SaveCustomModels(models []CustomModelEntry) error {
 	if err != nil {
 		return err
 	}
-	return ioutil.WriteFile(configPath, data, 0644)
+	return os.WriteFile(configPath, data, 0644)
 }
 
 // LoadCustomModels loads custom model configurations.
 func (a *App) LoadCustomModels() ([]CustomModelEntry, error) {
 	configPath := filepath.Join(configDir(), "custom_models.json")
-	data, err := ioutil.ReadFile(configPath)
+	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -1086,4 +1523,191 @@ func (a *App) LoadCustomModels() ([]CustomModelEntry, error) {
 		}
 	}
 	return models, nil
+}
+
+// ------- Pipeline (Multi-Agent Orchestration) -------
+
+// PipelineInfo is a lightweight pipeline descriptor for the frontend.
+type PipelineInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	StageCount  int    `json:"stageCount"`
+}
+
+// ListPipelines returns all available pipeline definitions.
+func (a *App) ListPipelines() []PipelineInfo {
+	pipelines := pipeline.AllPipelines()
+	result := make([]PipelineInfo, len(pipelines))
+	for i, p := range pipelines {
+		result[i] = PipelineInfo{
+			ID:          p.ID,
+			Name:        p.Name,
+			Description: p.Description,
+			StageCount:  len(p.Stages),
+		}
+	}
+	return result
+}
+
+// RunPipelineRequest is the request payload for RunPipeline.
+type RunPipelineRequest struct {
+	PipelineID  string `json:"pipelineId"`
+	UserInput   string `json:"userInput"`
+	ProjectPath string `json:"projectPath"`
+}
+
+// RunPipeline starts a pipeline execution and returns the result.
+func (a *App) RunPipeline(req RunPipelineRequest) (*pipeline.PipelineRun, error) {
+	var targetPipeline pipeline.Pipeline
+	found := false
+	for _, p := range pipeline.AllPipelines() {
+		if p.ID == req.PipelineID {
+			targetPipeline = p
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("pipeline not found: %s", req.PipelineID)
+	}
+	return a.pipelineExec.Run(a.ctx, targetPipeline, req.UserInput, req.ProjectPath)
+}
+
+// StopPipeline cancels the running pipeline.
+func (a *App) StopPipeline() {
+	a.pipelineExec.Stop()
+}
+
+// ------- Code Completion (FIM) -------
+
+// CodeCompleteRequest is the request payload for CodeComplete.
+type CodeCompleteRequest struct {
+	BeforeCursor string `json:"beforeCursor"`
+	AfterCursor  string `json:"afterCursor"`
+	FileName     string `json:"fileName"`
+	Language     string `json:"language"`
+	MaxTokens    int    `json:"maxTokens,omitempty"`
+}
+
+// CodeComplete performs line-level code completion.
+func (a *App) CodeComplete(req CodeCompleteRequest) (*completion.Suggestion, error) {
+	return a.completionSvc.Complete(a.ctx, completion.FIMRequest{
+		BeforeCursor: req.BeforeCursor,
+		AfterCursor:  req.AfterCursor,
+		FileName:     req.FileName,
+		Language:     req.Language,
+		MaxTokens:    req.MaxTokens,
+	})
+}
+
+// CodeCompleteMultiLine performs block-level code completion.
+func (a *App) CodeCompleteMultiLine(req CodeCompleteRequest) (*completion.Suggestion, error) {
+	return a.completionSvc.CompleteMultiLine(a.ctx, completion.FIMRequest{
+		BeforeCursor: req.BeforeCursor,
+		AfterCursor:  req.AfterCursor,
+		FileName:     req.FileName,
+		Language:     req.Language,
+		MaxTokens:    req.MaxTokens,
+	})
+}
+
+// ------- RAG (Semantic Search) -------
+
+// IndexProject indexes the project for semantic search.
+func (a *App) IndexProject(projectPath string) error {
+	return a.ragSvc.IndexProject(a.ctx, projectPath)
+}
+
+// RAGSearch performs semantic search on the indexed project.
+func (a *App) RAGSearch(projectPath string, query string, topK int) ([]rag.SearchResult, error) {
+	return a.ragSvc.Search(a.ctx, projectPath, query, topK)
+}
+
+// RAGSearchHybrid performs hybrid (semantic + keyword) search.
+func (a *App) RAGSearchHybrid(projectPath string, query string, topK int) ([]rag.SearchResult, error) {
+	return a.ragSvc.SearchHybrid(a.ctx, projectPath, query, topK)
+}
+
+// RAGIndexStats returns indexing statistics.
+func (a *App) RAGIndexStats(projectPath string) map[string]any {
+	return a.ragSvc.GetIndexStats(projectPath)
+}
+
+// RAGIndexFileIncremental incrementally indexes a single changed file.
+func (a *App) RAGIndexFileIncremental(projectPath, filePath string) error {
+	return a.ragSvc.IndexFileIncremental(a.ctx, projectPath, filePath)
+}
+
+// RAGRemoveFileFromIndex removes a file from the RAG index.
+func (a *App) RAGRemoveFileFromIndex(projectPath, filePath string) {
+	a.ragSvc.RemoveFileFromIndex(projectPath, filePath)
+}
+
+// ------- Verification (Edit→Lint→Test→Fix Loop) -------
+
+// VerifyProject runs all checks on the current project.
+func (a *App) VerifyProject() *verify.VerificationResult {
+	return a.verifySvc.Verify(a.ctx, nil)
+}
+
+// VerifyFile runs checks for a specific file.
+func (a *App) VerifyFile(filePath string) *verify.VerificationResult {
+	return a.verifySvc.VerifyFile(a.ctx, filePath)
+}
+
+// QuickVerifyFile runs a quick check on a single file.
+func (a *App) QuickVerifyFile(filePath string) *verify.CheckResult {
+	return a.verifySvc.QuickVerify(a.ctx, filePath)
+}
+
+// RunTests runs project tests and returns structured results.
+func (a *App) RunTests(testPath string) []verify.TestSuiteResult {
+	return a.verifySvc.RunTests(a.ctx, testPath)
+}
+
+// autoVerify is the VerifyFunc callback for the AI service.
+// It runs quick verification on modified files and returns a summary.
+func (a *App) autoVerify(ctx context.Context, filePaths []string) string {
+	if a.verifySvc == nil || len(filePaths) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	for _, fp := range filePaths {
+		cr := a.verifySvc.QuickVerify(ctx, fp)
+		if cr == nil {
+			continue
+		}
+		if cr.Passed {
+			sb.WriteString(fmt.Sprintf("✓ %s: %s passed\n", fp, cr.Type))
+		} else {
+			sb.WriteString(fmt.Sprintf("✗ %s: %s FAILED\n", fp, cr.Type))
+			if cr.Output != "" {
+				maxLen := 1500
+				output := cr.Output
+				if len(output) > maxLen {
+					output = output[:maxLen] + "\n... [truncated]"
+				}
+				sb.WriteString(output + "\n")
+			}
+		}
+	}
+	return sb.String()
+}
+
+// ------- Code Scan (OWASP/CWE Rules) -------
+
+// CodeScanFile scans a single file for security issues.
+func (a *App) CodeScanFile(filePath string, content string) *codescan.ScanResult {
+	return a.codeScanEngine.ScanFileWithResult(content, filePath, "")
+}
+
+// CodeScanRules returns all available security rules.
+func (a *App) CodeScanRules() []codescan.Rule {
+	return a.codeScanEngine.ListRules()
+}
+
+// CodeScanStats returns rule statistics.
+func (a *App) CodeScanStats() map[string]int {
+	return a.codeScanEngine.Stats()
 }

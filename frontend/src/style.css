@@ -12,6 +12,7 @@
     --text-primary: #cccccc;
     --text-secondary: #858585;
     --text-muted: #6e6e6e;
+    --text-on-accent: #ffffff;
     --accent: #0078d4;
     --accent-hover: #106ebe;
     --accent-active: #005a9e;
@@ -27,6 +28,9 @@
     --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
     --shadow-lg: 0 8px 24px rgba(0,0,0,0.5);
     --ring: 0 0 0 2px #0078d4;
+    --z-dropdown: 100;
+    --z-overlay: 200;
+    --z-modal: 300;
 }
 
 [data-theme="light"], .theme-light {
@@ -40,6 +44,7 @@
     --text-primary: #333333;
     --text-secondary: #666666;
     --text-muted: #999999;
+    --text-on-accent: #ffffff;
     --accent: #0078d4;
     --accent-hover: #106ebe;
     --accent-active: #005a9e;
@@ -55,14 +60,17 @@
     --shadow-md: 0 4px 12px rgba(0,0,0,0.12);
     --shadow-lg: 0 8px 24px rgba(0,0,0,0.16);
     --ring: 0 0 0 2px #0078d4;
+    --z-dropdown: 100;
+    --z-overlay: 200;
+    --z-modal: 300;
 }
 
 [data-theme="hc"], .theme-hc {
     --bg-primary: #000000;
     --bg-secondary: #0a0a0a;
     --bg-tertiary: #1a1a1a;
-    --bg-hover: #1a1a1a;
-    --bg-active: #2a2a2a;
+    --bg-hover: #2a2a2a;
+    --bg-active: #3a3a3a;
     --border: #6fc3df;
     --border-focus: #4fc3f7;
     --text-primary: #ffffff;
@@ -78,7 +86,11 @@
     --error-hover: #f48771;
     --info: #75beff;
     --ai-color: #89d185;
+    --text-on-accent: #000000;
     --selection: #264f78;
+    --z-dropdown: 100;
+    --z-overlay: 200;
+    --z-modal: 300;
     --shadow-sm: 0 0 0 1px #6fc3df;
     --shadow-md: 0 0 0 2px #6fc3df;
     --shadow-lg: 0 0 0 3px #6fc3df;
@@ -97,7 +109,7 @@
     --color-text-secondary: var(--text-secondary);
     --color-text-muted: var(--text-muted);
     --color-accent: var(--accent);
-    --color-success: var(--ai-color);
+    --color-success: var(--success);
     --color-warning: var(--warning);
     --color-error: var(--error);
 
@@ -128,6 +140,21 @@
         color: var(--text-primary);
     }
 
+    *:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+    }
+
+    button:focus-visible, [role="button"]:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+    }
+
+    input:focus-visible, textarea:focus-visible, select:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+    }
+
     ::-webkit-scrollbar {
         width: 8px;
         height: 8px;
@@ -151,7 +178,7 @@
     }
 
     ::selection {
-        background: rgba(0, 80, 200, 0.35);
+        background: var(--selection);
     }
 
 }
@@ -162,7 +189,7 @@
     color: inherit !important;
 }
 .cm-editor *::selection {
-    background: rgba(0, 80, 200, 0.35) !important;
+    background: var(--selection) !important;
     color: inherit !important;
 }
 
@@ -190,7 +217,7 @@
 
     .btn-primary {
         background-color: var(--accent);
-        color: #ffffff;
+        color: var(--text-on-accent);
         border-color: var(--accent);
     }
     .btn-primary:hover {
@@ -230,7 +257,7 @@
 
     .btn-danger {
         background-color: var(--error);
-        color: #ffffff;
+        color: var(--text-on-accent);
         border-color: var(--error);
     }
     .btn-danger:hover {
@@ -243,7 +270,7 @@
 
     .btn-success {
         background-color: var(--success);
-        color: #ffffff;
+        color: var(--text-on-accent);
         border-color: var(--success);
     }
     .btn-success:hover {
@@ -407,19 +434,19 @@
 
     .chip-accent {
         border-color: var(--accent);
-        background-color: rgba(0, 120, 212, 0.1);
+        background-color: color-mix(in srgb, var(--accent) 10%, transparent);
         color: var(--accent);
     }
 
     .chip-ai {
         border-color: var(--ai-color);
-        background-color: rgba(78, 201, 176, 0.1);
+        background-color: color-mix(in srgb, var(--ai-color) 10%, transparent);
         color: var(--ai-color);
     }
 
     .chip-error {
         border-color: var(--error);
-        background-color: rgba(215, 58, 73, 0.1);
+        background-color: color-mix(in srgb, var(--error) 10%, transparent);
         color: var(--error);
     }
 }
@@ -506,4 +533,30 @@
 @keyframes pulseSubtle {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.7; }
+}
+
+.cm-diff-changed {
+    background-color: color-mix(in srgb, var(--warning) 15%, transparent) !important;
+    border-left: 3px solid var(--warning) !important;
+}
+
+.cm-diff-deleted {
+    background-color: color-mix(in srgb, var(--error) 12%, transparent) !important;
+    border-left: 3px solid var(--error) !important;
+    text-decoration: line-through;
+    opacity: 0.7;
+}
+
+.cm-diff-added {
+    background-color: rgba(78, 201, 176, 0.12) !important;
+    border-left: 3px solid #4ec9b0 !important;
+}
+
+.cm-diff-line {
+    font-family: 'Consolas', 'Cascadia Code', monospace;
+    font-size: 12px;
+    padding: 1px 8px 1px 28px;
+    white-space: pre;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }

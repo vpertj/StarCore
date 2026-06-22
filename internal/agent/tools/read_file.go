@@ -3,7 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"strconv"
 	"strings"
 
@@ -42,18 +42,18 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]any) (string
 		tryFiles := []string{"main.go", "app.go", "go.mod", "package.json", "README.md", "index.html", "Cargo.toml", "pyproject.toml", "composer.json", "Gemfile", "Makefile", "main.py", "main.rs", "server.js", "Dockerfile"}
 		var foundFiles []string
 		for _, f := range tryFiles {
-			if _, err := ioutil.ReadFile(f); err == nil {
+			if _, err := os.ReadFile(f); err == nil {
 				foundFiles = append(foundFiles, f)
 			}
 		}
 		if len(foundFiles) > 0 {
 			// Read the first found file
-			data, _ := ioutil.ReadFile(foundFiles[0])
+			data, _ := os.ReadFile(foundFiles[0])
 			result := fmt.Sprintf("Auto-detected %s:\n\n```\n%s\n```\n\nOther files: %s", foundFiles[0], string(data), strings.Join(foundFiles[1:], ", "))
 			return result, nil
 		}
 		// List all files
-		files, _ := ioutil.ReadDir(".")
+		files, _ := os.ReadDir(".")
 		var list string
 		for _, f := range files {
 			if f.IsDir() && !strings.HasPrefix(f.Name(), ".") {
@@ -65,7 +65,13 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]any) (string
 		return "", fmt.Errorf("No file path specified. Files in project:\n%s\nPlease specify one.", list)
 	}
 
-	data, err := ioutil.ReadFile(path)
+	if SandboxConfig != nil {
+		if err := SandboxConfig.ValidatePath(path); err != nil {
+			return "", fmt.Errorf("path validation failed: %w", err)
+		}
+	}
+
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}

@@ -25,10 +25,10 @@ function getLanguage(filePath) {
   }
 }
 
-$: activeAgentName = $agents.find(a => a.id === $activeAgentId)?.name || 'AI'
+let activeAgentName = $derived($agents.find(a => a.id === $activeAgentId)?.name || 'AI')
 </script>
 
-<div class="flex items-center justify-between px-4 py-1 border-t text-xs" style="background-color: var(--accent); color: #ffffff; border-color: var(--border);">
+  <div class="flex items-center justify-between px-4 py-1 border-t text-xs" style="background-color: var(--accent); color: var(--text-on-accent); border-color: var(--border);">
   <div class="flex items-center gap-4">
     <span class="truncate-text max-w-[300px]" title={$activeFile}>
       {#if $activeFile}
@@ -41,14 +41,14 @@ $: activeAgentName = $agents.find(a => a.id === $activeAgentId)?.name || 'AI'
   </div>
 
   <div class="flex items-center gap-4">
-    <button class="flex items-center gap-1 cursor-pointer bg-transparent border-none text-inherit text-xs p-0" title="AI Provider" on:click={() => bottomPanelVisible.set(true)}>
-      <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <button class="flex items-center gap-1 cursor-pointer bg-transparent border-none text-inherit text-xs p-0 truncate max-w-[300px]" title="AI Provider" onclick={() => bottomPanelVisible.set(true)}>
+      <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
       </svg>
-      {activeAgentName} · {$activeProviderId} / {$activeModelId}
+      <span class="truncate">{activeAgentName} · {$activeProviderId} / {$activeModelId}</span>
     </button>
     {#if $completionLoading}
-      <span style="color: #e5c07b;">⟳ {$t('completion.loading')}</span>
+      <span style="color: var(--warning);">⟳ {$t('completion.loading')}</span>
     {:else if $completionVisible}
       <span style="color: var(--text-muted);">{$t('completion.ready')} ({$t('completion.tabAccept')})</span>
     {/if}
@@ -63,10 +63,4 @@ $: activeAgentName = $agents.find(a => a.id === $activeAgentId)?.name || 'AI'
   </div>
 </div>
 
-<style>
-.truncate-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-</style>
+

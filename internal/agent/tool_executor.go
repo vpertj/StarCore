@@ -7,13 +7,65 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
+
+	"StarCore/internal/sandbox"
 )
 
 type ToolExecutor struct {
 	tools           map[string]Tool
 	autoApprove     map[string]bool
 	pendingApproval map[string]chan bool
+	cache           map[string]*cacheEntry
+	lru             *lruList
 	mu              sync.RWMutex
+}
+
+type cacheEntry struct {
+	result    *ToolResult
+	createdAt time.Time
+	accessAt  time.Time
+	key       string
+}
+
+type lruList struct {
+	entries []*cacheEntry
+	maxSize int
+}
+
+func newLRUList(maxSize int) *lruList {
+	return &lruList{maxSize: maxSize}
+}
+
+func (l *lruList) push(e *cacheEntry) {
+	e.accessAt = time.Now()
+	l.entries = append(l.entries, e)
+	if len(l.entries) > l.maxSize {
+		oldest := 0
+		for i, entry := range l.entries {
+			if entry.accessAt.Before(l.entries[oldest].accessAt) {
+				oldest = i
+			}
+		}
+		l.entries = append(l.entries[:oldest], l.entries[oldest+1:]...)
+	}
+}
+
+func (l *lruList) touch(key string) {
+	for _, e := range l.entries {
+		if e.key == key {
+			e.accessAt = time.Now()
+			return
+		}
+	}
+}
+
+func (l *lruList) removeByKey(prefix string) {
+	for i := len(l.entries) - 1; i >= 0; i-- {
+		if strings.HasPrefix(l.entries[i].key, prefix) {
+			l.entries = append(l.entries[:i], l.entries[i+1:]...)
+		}
+	}
 }
 
 func NewToolExecutor() *ToolExecutor {
@@ -21,6 +73,8 @@ func NewToolExecutor() *ToolExecutor {
 		tools:           make(map[string]Tool),
 		autoApprove:     make(map[string]bool),
 		pendingApproval: make(map[string]chan bool),
+		cache:           make(map[string]*cacheEntry),
+		lru:             newLRUList(200),
 	}
 }
 
@@ -129,7 +183,34 @@ func (e *ToolExecutor) Execute(ctx context.Context, call ToolCall) (*ToolResult,
 		return nil, fmt.Errorf("tool not found: %s", call.Name)
 	}
 
-	// Check if approval is needed
+	params := tool.Parameters()
+	propTypes := make(map[string]string)
+	for k, v := range params.Properties {
+		propTypes[k] = v.Type
+	}
+	if errs := sandbox.ValidateToolArgs(call.Name, call.Args, params.Required, propTypes); len(errs) > 0 {
+		errMsg := errs[0].Error()
+		sandbox.LogAudit(call.Name, "validate", call.Args, "", fmt.Errorf("%s", errMsg), false)
+		return nil, fmt.Errorf("%s", errMsg)
+	}
+
+	cacheKey := e.buildCacheKey(call)
+	if cacheKey != "" {
+		e.mu.RLock()
+		if entry, exists := e.cache[cacheKey]; exists {
+			if time.Since(entry.createdAt) < 30*time.Second {
+				e.mu.RUnlock()
+				e.mu.Lock()
+				e.lru.touch(cacheKey)
+				e.mu.Unlock()
+				cached := *entry.result
+				cached.CallID = call.ID
+				return &cached, nil
+			}
+		}
+		e.mu.RUnlock()
+	}
+
 	if tool.RequiresApproval() && !autoApproved {
 		if !e.WaitForApproval(ctx, call.ID) {
 			return &ToolResult{
@@ -142,6 +223,7 @@ func (e *ToolExecutor) Execute(ctx context.Context, call ToolCall) (*ToolResult,
 
 	result, err := tool.Execute(ctx, call.Args)
 	if err != nil {
+		sandbox.LogAudit(call.Name, "execute", call.Args, "", err, autoApproved)
 		return &ToolResult{
 			CallID: call.ID,
 			Name:   call.Name,
@@ -155,7 +237,63 @@ func (e *ToolExecutor) Execute(ctx context.Context, call ToolCall) (*ToolResult,
 		Result: result,
 	}
 	tr.FileMeta = buildFileMetaFromResult(call.Name, call.Args, result)
+
+	sandbox.LogAudit(call.Name, "execute", call.Args, result, nil, autoApproved)
+
+	if cacheKey != "" && !tool.RequiresApproval() {
+		e.mu.Lock()
+		entry := &cacheEntry{result: tr, createdAt: time.Now(), accessAt: time.Now(), key: cacheKey}
+		e.cache[cacheKey] = entry
+		e.lru.push(entry)
+		e.mu.Unlock()
+	}
+
 	return tr, nil
+}
+
+func (e *ToolExecutor) InvalidateCacheForFile(filePath string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	prefix := "read_file:" + filePath + ":"
+	prefix2 := "glob_files:"
+	for k := range e.cache {
+		if strings.HasPrefix(k, prefix) || strings.HasPrefix(k, prefix2) {
+			delete(e.cache, k)
+		}
+	}
+	e.lru.removeByKey(prefix)
+	e.lru.removeByKey(prefix2)
+}
+
+func (e *ToolExecutor) ClearCache() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.cache = make(map[string]*cacheEntry)
+}
+
+func (e *ToolExecutor) buildCacheKey(call ToolCall) string {
+	switch call.Name {
+	case "read_file":
+		path, _ := call.Args["path"].(string)
+		offset, _ := call.Args["offset"].(float64)
+		limit, _ := call.Args["limit"].(float64)
+		return fmt.Sprintf("read_file:%s:%.0f:%.0f", path, offset, limit)
+	case "glob_files":
+		pattern, _ := call.Args["pattern"].(string)
+		path, _ := call.Args["path"].(string)
+		return fmt.Sprintf("glob_files:%s:%s", pattern, path)
+	case "list_directory":
+		path, _ := call.Args["path"].(string)
+		return fmt.Sprintf("list_directory:%s", path)
+	case "search_files":
+		query, _ := call.Args["query"].(string)
+		path, _ := call.Args["path"].(string)
+		return fmt.Sprintf("search_files:%s:%s", path, query)
+	case "get_git_diff":
+		return "get_git_diff"
+	default:
+		return ""
+	}
 }
 
 // buildFileMetaFromResult constructs FileMeta from the tool name, args, and result.

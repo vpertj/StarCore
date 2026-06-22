@@ -115,7 +115,7 @@ func (s *Service) Log(projectPath string, count int) ([]LogEntry, error) {
 	if count < 1 || count > 100 {
 		count = 20
 	}
-	format := "--format=%H|%an|%ar"
+	format := "--format=%H|%s|%an|%ar"
 	out, err := runGit(projectPath, "log", fmt.Sprintf("-%d", count), format)
 	if err != nil {
 		return nil, err
@@ -126,7 +126,7 @@ func (s *Service) Log(projectPath string, count int) ([]LogEntry, error) {
 	lines := strings.Split(out, "\n")
 	entries := make([]LogEntry, 0, len(lines))
 	for _, line := range lines {
-		parts := strings.SplitN(line, "|", 3)
+		parts := strings.SplitN(line, "|", 4)
 		if len(parts) >= 2 {
 			hash := parts[0]
 			if len(hash) > 8 {
@@ -232,4 +232,127 @@ func (s *Service) Stash(projectPath string, action string) (string, error) {
 		return runGit(projectPath, "stash", action)
 	}
 	return runGit(projectPath, "stash")
+}
+
+type BlameLine struct {
+	Hash    string `json:"hash"`
+	Author  string `json:"author"`
+	Date    string `json:"date"`
+	Line    int    `json:"line"`
+	Content string `json:"content"`
+}
+
+func (s *Service) Blame(projectPath string, filePath string) ([]BlameLine, error) {
+	out, err := runGit(projectPath, "blame", "--porcelain", filePath)
+	if err != nil {
+		return nil, err
+	}
+	return parseBlame(out), nil
+}
+
+func parseBlame(output string) []BlameLine {
+	var lines []BlameLine
+	currentHash := ""
+	currentAuthor := ""
+	currentDate := ""
+	lineNum := 0
+
+	for _, line := range strings.Split(output, "\n") {
+		if len(line) == 0 {
+			continue
+		}
+		if line[0] >= '0' && line[0] <= '9' || line[0] >= 'a' && line[0] <= 'f' {
+			parts := strings.SplitN(line, " ", 4)
+			if len(parts) >= 3 {
+				currentHash = parts[0]
+				fmt.Sscanf(parts[2], "%d", &lineNum)
+			}
+		} else if strings.HasPrefix(line, "author ") {
+			currentAuthor = strings.TrimPrefix(line, "author ")
+		} else if strings.HasPrefix(line, "author-time ") {
+			ts := strings.TrimPrefix(line, "author-time ")
+			if t, err := fmt.Sscanf(ts, "%d", new(int)); err == nil && t == 1 {
+				currentDate = ts
+			}
+		} else if strings.HasPrefix(line, "\t") {
+			lines = append(lines, BlameLine{
+				Hash:    currentHash[:min(len(currentHash), 8)],
+				Author:  currentAuthor,
+				Date:    currentDate,
+				Line:    lineNum,
+				Content: strings.TrimPrefix(line, "\t"),
+			})
+		}
+	}
+	return lines
+}
+
+func (s *Service) VisualDiff(projectPath string, filePath string) (string, error) {
+	return runGit(projectPath, "diff", "--unified=5", "--", filePath)
+}
+
+func (s *Service) DiffBetween(projectPath string, from string, to string, filePath string) (string, error) {
+	return runGit(projectPath, "diff", "--unified=5", from, to, "--", filePath)
+}
+
+func (s *Service) RemoteList(projectPath string) (string, error) {
+	return runGit(projectPath, "remote", "-v")
+}
+
+func (s *Service) FetchRemote(projectPath string, remote string) (string, error) {
+	if remote == "" {
+		remote = "origin"
+	}
+	return runGit(projectPath, "fetch", remote)
+}
+
+func (s *Service) LogFile(projectPath string, filePath string, count int) ([]LogEntry, error) {
+	if count <= 0 {
+		count = 20
+	}
+	out, err := runGit(projectPath, "log", fmt.Sprintf("-%d", count), "--format=%H|%s|%an|%ai", "--", filePath)
+	if err != nil {
+		return nil, err
+	}
+	return parseLogEntries(out), nil
+}
+
+func parseLogEntries(output string) []LogEntry {
+	if output == "" {
+		return nil
+	}
+	var entries []LogEntry
+	for _, line := range strings.Split(output, "\n") {
+		parts := strings.SplitN(line, "|", 4)
+		if len(parts) < 2 {
+			continue
+		}
+		hash := parts[0]
+		if len(hash) > 8 {
+			hash = hash[:8]
+		}
+		entry := LogEntry{Hash: hash}
+		if len(parts) > 1 {
+			entry.Message = parts[1]
+		}
+		if len(parts) > 2 {
+			entry.Author = parts[2]
+		}
+		if len(parts) > 3 {
+			entry.Date = parts[3]
+		}
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+func (s *Service) ConflictFiles(projectPath string) ([]string, error) {
+	out, err := runGit(projectPath, "diff", "--name-only", "--diff-filter=U")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(strings.TrimSpace(out), "\n"), nil
 }

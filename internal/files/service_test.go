@@ -1,7 +1,6 @@
 package files
 
 import (
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -103,7 +102,7 @@ func TestApplyDiff(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	content, _ := ioutil.ReadFile(testPath)
+	content, _ := os.ReadFile(testPath)
 	if string(content) != "aaa\nBBB\nccc" {
 		t.Errorf("expected 'aaa\\nBBB\\nccc', got '%s'", string(content))
 	}

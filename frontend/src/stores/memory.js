@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store'
+import { writable, get } from 'svelte/store'
 
 /** @typedef {{ id: string, projectPath: string, agentId: string, model: string, providerId: string, title: string, summary: string, createdAt: string, updatedAt: string, messageCount: number }} Conversation */
 /** @typedef {{ id: string, conversationId: string, seq: number, role: string, content: string, thinking: string, tokensIn: number, tokensOut: number, createdAt: string }} ConversationMessage */
@@ -172,13 +172,3 @@ export function clearActiveConversation() {
   activeMessages.set([])
 }
 
-/**
- * @template T
- * @param {import('svelte/store').Readable<T>} store
- * @returns {T}
- */
-function get(store) {
-  /** @type {any} */ let value = undefined
-  store.subscribe(v => value = v)()
-  return value
-}

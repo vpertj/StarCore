@@ -6,7 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -64,6 +65,14 @@ type openAIResponse struct {
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+		PromptTokensDetails *struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details,omitempty"`
+	} `json:"usage,omitempty"`
 	Error *struct {
 		Message string `json:"message"`
 		Type    string `json:"type"`
@@ -91,6 +100,14 @@ type openAIStreamChunk struct {
 		} `json:"message,omitempty"`
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+		PromptTokensDetails *struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details,omitempty"`
+	} `json:"usage,omitempty"`
 	Error *struct {
 		Message string `json:"message"`
 		Type    string `json:"type"`
@@ -191,7 +208,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 	}
 	defer resp.Body.Close()
 
-	respBody, err := ioutil.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -211,10 +228,23 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 
 	msg := apiResp.Choices[0].Message
 
+	var usage *TokenUsage
+	if apiResp.Usage != nil {
+		usage = &TokenUsage{
+			PromptTokens:     apiResp.Usage.PromptTokens,
+			CompletionTokens: apiResp.Usage.CompletionTokens,
+			TotalTokens:      apiResp.Usage.TotalTokens,
+		}
+		if apiResp.Usage.PromptTokensDetails != nil {
+			usage.CachedTokens = apiResp.Usage.PromptTokensDetails.CachedTokens
+		}
+	}
+
 	return &ChatResponse{
 		Content:  msg.Content,
 		Provider: p.ID(),
 		Model:    req.Model,
+		Usage:    usage,
 	}, nil
 }
 
@@ -276,7 +306,7 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest) (<-cha
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			bodyBytes, _ := ioutil.ReadAll(resp.Body)
+			bodyBytes, _ := io.ReadAll(resp.Body)
 			ch <- StreamEvent{Type: "error", Content: fmt.Sprintf("API returned status %d: %s", resp.StatusCode, string(bodyBytes))}
 			return
 		}
@@ -292,6 +322,7 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest) (<-cha
 		var pendingToolCalls []*ToolCall
 		var chunkCount int
 		firstChunk := true
+		var lastUsage *TokenUsage
 
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -331,6 +362,18 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest) (<-cha
 			if chunk.Error != nil {
 				ch <- StreamEvent{Type: "error", Content: chunk.Error.Message}
 				return
+			}
+
+			// Capture usage from chunk if available
+			if chunk.Usage != nil {
+				lastUsage = &TokenUsage{
+					PromptTokens:     chunk.Usage.PromptTokens,
+					CompletionTokens: chunk.Usage.CompletionTokens,
+					TotalTokens:      chunk.Usage.TotalTokens,
+				}
+				if chunk.Usage.PromptTokensDetails != nil {
+					lastUsage.CachedTokens = chunk.Usage.PromptTokensDetails.CachedTokens
+				}
 			}
 
 			delta := chunk.Choices[0].Delta
@@ -412,7 +455,7 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest) (<-cha
 			}
 		}
 
-		ch <- StreamEvent{Type: "done"}
+		ch <- StreamEvent{Type: "done", Usage: lastUsage}
 	}()
 
 	return ch, nil
@@ -496,6 +539,7 @@ func (p *OpenAIProvider) ListModels(ctx context.Context) ([]Model, error) {
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
 	if err != nil {
+		log.Printf("[ListModels] request creation failed: %v", err)
 		return defaultModels(p), nil
 	}
 
@@ -504,11 +548,13 @@ func (p *OpenAIProvider) ListModels(ctx context.Context) ([]Model, error) {
 	client := NewHTTPClient(10 * time.Second)
 	resp, err := client.Do(httpReq)
 	if err != nil {
+		log.Printf("[ListModels] request failed: %v", err)
 		return defaultModels(p), nil
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		log.Printf("[ListModels] unexpected status %d", resp.StatusCode)
 		return defaultModels(p), nil
 	}
 
@@ -518,6 +564,7 @@ func (p *OpenAIProvider) ListModels(ctx context.Context) ([]Model, error) {
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		log.Printf("[ListModels] decode failed: %v", err)
 		return defaultModels(p), nil
 	}
 

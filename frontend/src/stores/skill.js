@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store'
+import { writable, get } from 'svelte/store'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime.js'
 import { customModels, resolveModelProvider } from './provider.js'
 
@@ -103,13 +103,3 @@ export function clearSkillResult() {
   executingSkillId.set(null)
 }
 
-/**
- * @template T
- * @param {import('svelte/store').Readable<T>} store
- * @returns {T}
- */
-function get(store) {
-  /** @type {any} */ let value = undefined
-  store.subscribe(v => value = v)()
-  return value
-}

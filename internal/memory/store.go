@@ -106,9 +106,38 @@ CREATE TABLE IF NOT EXISTS token_usage (
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_project ON knowledge(project_path);
 CREATE INDEX IF NOT EXISTS idx_token_usage_conv ON token_usage(conversation_id);
+
+CREATE TABLE IF NOT EXISTS rag_chunks (
+    id TEXT PRIMARY KEY,
+    project_path TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    language TEXT DEFAULT '',
+    indexed_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS rag_embeddings (
+    chunk_id TEXT PRIMARY KEY REFERENCES rag_chunks(id),
+    embedding BLOB NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS rag_file_meta (
+    project_path TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    mod_time TEXT NOT NULL,
+    PRIMARY KEY (project_path, file_path)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rag_chunks_project ON rag_chunks(project_path);
+CREATE INDEX IF NOT EXISTS idx_rag_chunks_file ON rag_chunks(file_path);
 `
 	_, err := s.db.Exec(ddl)
-	return err
+	if err != nil {
+		return err
+	}
+	s.db.Exec(`ALTER TABLE messages ADD COLUMN metadata TEXT DEFAULT ''`)
+	return nil
 }
 
 func generateID() string {

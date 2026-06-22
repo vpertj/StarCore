@@ -51,7 +51,7 @@ async function handleAdd() {
     id: newId,
     name: newName,
     command: newCommand,
-    args: newArgs ? newArgs.split(/\\s+/) : [],
+    args: newArgs ? newArgs.split(/\s+/) : [],
     endpoint: newEndpoint,
     transport: newTransport,
     enabled: true,
@@ -68,7 +68,7 @@ async function handleAdd() {
   </div>
   <div class="flex items-center justify-between">
     <h3 class="text-sm font-medium" style="color: var(--text-primary);">服务器列表</h3>
-    <button class="px-2 py-1 rounded text-xs" style="background-color: var(--accent); color: #fff;" on:click={() => { resetForm(); showForm = true }}>
+    <button class="px-2 py-1 rounded text-xs" style="background-color: var(--accent); color: #fff;" onclick={() => { resetForm(); showForm = true }}>
       {showForm ? '关闭' : '+ 添加'}
     </button>
   </div>
@@ -89,8 +89,8 @@ async function handleAdd() {
       {/if}
       <textarea bind:value={newEnv} placeholder="环境变量 (KEY=VALUE, 每行一个)" class="w-full px-3 py-1.5 rounded border text-sm" style="background-color: var(--bg-secondary); color: var(--text-primary); border-color: var(--border); min-height: 60px;" rows="3"></textarea>
       <div class="flex gap-2">
-        <button class="flex-1 px-3 py-1.5 rounded text-sm" style="background-color: var(--border); color: var(--text-primary);" on:click={resetForm}>取消</button>
-        <button class="flex-1 px-3 py-1.5 rounded text-sm font-medium" style="background-color: var(--accent); color: #fff;" on:click={handleAdd}>{editMode ? '保存修改' : '添加'}</button>
+        <button class="flex-1 px-3 py-1.5 rounded text-sm" style="background-color: var(--border); color: var(--text-primary);" onclick={resetForm}>取消</button>
+        <button class="flex-1 px-3 py-1.5 rounded text-sm font-medium" style="background-color: var(--accent); color: #fff;" onclick={handleAdd}>{editMode ? '保存修改' : '添加'}</button>
       </div>
     </div>
   {/if}
@@ -109,14 +109,14 @@ async function handleAdd() {
         </div>
         <div class="flex items-center gap-1">
           {#if status === 'running'}
-            <button class="px-2 py-1 rounded text-xs" style="color: #e5c07b;" on:click={() => stopMCPServer(server.id)}>停止</button>
+            <button class="px-2 py-1 rounded text-xs" style="color: #e5c07b;" onclick={() => stopMCPServer(server.id)}>停止</button>
           {:else if status === 'disabled' || !server.enabled}
-            <button class="px-2 py-1 rounded text-xs" style="color: var(--text-primary); background-color: var(--border);" on:click={() => enableMCPServer(server.id)}>启用</button>
+            <button class="px-2 py-1 rounded text-xs" style="color: var(--text-primary); background-color: var(--border);" onclick={() => enableMCPServer(server.id)}>启用</button>
           {:else}
-            <button class="px-2 py-1 rounded text-xs" style="color: var(--text-primary); background-color: var(--border);" on:click={() => startMCPServer(server.id)}>启动</button>
+            <button class="px-2 py-1 rounded text-xs" style="color: var(--text-primary); background-color: var(--border);" onclick={() => startMCPServer(server.id)}>启动</button>
           {/if}
-          <button class="px-2 py-1 rounded text-xs" style="color: var(--accent);" on:click={() => editServer(server)}>编辑</button>
-          <button class="px-2 py-1 rounded text-xs" style="color: #d73a49;" on:click={() => { if (confirm('确定删除？')) removeMCPServer(server.id) }}>删除</button>
+          <button class="px-2 py-1 rounded text-xs" style="color: var(--accent);" onclick={() => editServer(server)}>编辑</button>
+          <button class="px-2 py-1 rounded text-xs" style="color: #d73a49;" onclick={() => { if (confirm('确定删除？')) removeMCPServer(server.id) }}>删除</button>
         </div>
       </div>
       {#if errMsg}

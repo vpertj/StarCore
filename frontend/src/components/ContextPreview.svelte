@@ -26,7 +26,7 @@ function removeCode() {
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
         </svg>
         <span class="truncate" style="max-width: 120px;">{file.split(/[\\/]/).pop()}</span>
-        <button on:click={() => removeFile(i)} style="color: var(--text-secondary);" aria-label="移除" class="hover:text-white transition-colors">&times;</button>
+        <button onclick={() => removeFile(i)} style="color: var(--text-secondary);" aria-label="移除" class="hover:text-white transition-colors">&times;</button>
       </div>
     {/each}
     {#if contextCode}
@@ -35,7 +35,7 @@ function removeCode() {
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
         </svg>
         <span>代码片段</span>
-        <button on:click={removeCode} style="color: var(--text-secondary);" aria-label="移除" class="hover:text-white transition-colors">&times;</button>
+        <button onclick={removeCode} style="color: var(--text-secondary);" aria-label="移除" class="hover:text-white transition-colors">&times;</button>
       </div>
     {/if}
     {#if diagnostics.length > 0}

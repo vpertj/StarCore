@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store'
+import { writable, get } from 'svelte/store'
 
 /** @typedef {{ id: string, name: string, icon: string, description?: string }} Agent */
 
@@ -25,13 +25,3 @@ export function getActiveAgent() {
   return $agents.find(a => a.id === $activeAgentId) || $agents[0] || null
 }
 
-/**
- * @template T
- * @param {import('svelte/store').Readable<T>} store
- * @returns {T}
- */
-function get(store) {
-  /** @type {any} */ let value = undefined
-  store.subscribe(v => value = v)()
-  return value
-}

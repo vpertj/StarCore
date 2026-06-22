@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -89,6 +89,11 @@ func (p *OllamaProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2000))
+		return nil, fmt.Errorf("ollama returned HTTP %d: %s", resp.StatusCode, string(body))
+	}
 
 	var result strings.Builder
 	reader := bufio.NewReader(resp.Body)
@@ -204,17 +209,20 @@ func (p *OllamaProvider) ListModels(ctx context.Context) ([]Model, error) {
 	client := NewHTTPClient(5 * time.Second)
 	resp, err := client.Do(httpReq)
 	if err != nil {
+		log.Printf("[ListModels] ollama request failed: %v", err)
 		return []Model{}, nil
 	}
 	defer resp.Body.Close()
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		log.Printf("[ListModels] read body failed: %v", err)
 		return []Model{}, nil
 	}
 
 	var modelsResp ollamaModelsResponse
 	if err := json.Unmarshal(body, &modelsResp); err != nil {
+		log.Printf("[ListModels] decode failed: %v", err)
 		return []Model{}, nil
 	}
 

@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -43,20 +43,37 @@ func (p *AnthropicProvider) timeout() time.Duration {
 }
 
 type anthropicContent struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Content   json.RawMessage `json:"content,omitempty"`
+	Type      string                `json:"type"`
+	Text      string                `json:"text,omitempty"`
+	ID        string                `json:"id,omitempty"`
+	Name      string                `json:"name,omitempty"`
+	Input     json.RawMessage       `json:"input,omitempty"`
+	ToolUseID string                `json:"tool_use_id,omitempty"`
+	Content   json.RawMessage       `json:"content,omitempty"`
+	Source    *anthropicImageSource `json:"source,omitempty"`
+}
+
+type anthropicImageSource struct {
+	Type      string `json:"type"`
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
+}
+
+type anthropicCacheControl struct {
+	Type string `json:"type"` // "ephemeral"
+}
+
+type anthropicSystemBlock struct {
+	Type         string               `json:"type"`
+	Text         string               `json:"text"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }
 
 type anthropicRequest struct {
 	Model       string             `json:"model"`
 	MaxTokens   int                `json:"max_tokens"`
 	Messages    []anthropicMessage `json:"messages"`
-	System      string             `json:"system,omitempty"`
+	System      interface{}        `json:"system,omitempty"` // string or []anthropicSystemBlock
 	Temperature float64            `json:"temperature,omitempty"`
 	Stream      bool               `json:"stream,omitempty"`
 	Tools       []anthropicTool    `json:"tools,omitempty"`
@@ -76,7 +93,13 @@ type anthropicMessage struct {
 type anthropicResponse struct {
 	Content    []anthropicContent `json:"content"`
 	StopReason string             `json:"stop_reason"`
-	Error      *struct {
+	Usage      *struct {
+		InputTokens              int `json:"input_tokens"`
+		OutputTokens             int `json:"output_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	} `json:"usage,omitempty"`
+	Error *struct {
 		Message string `json:"message"`
 		Type    string `json:"type"`
 	} `json:"error"`
@@ -94,6 +117,12 @@ type anthropicStreamEvent struct {
 		ID   string `json:"id,omitempty"`
 		Name string `json:"name,omitempty"`
 	} `json:"content_block"`
+	Usage *struct {
+		InputTokens              int `json:"input_tokens"`
+		OutputTokens             int `json:"output_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	} `json:"usage,omitempty"`
 	Message *anthropicResponse `json:"message"`
 	Error   *struct {
 		Message string `json:"message"`
@@ -139,10 +168,46 @@ func convertToAnthropicMessages(messages []Message) (string, []anthropicMessage)
 			})
 		default:
 			content = append(content, anthropicContent{Type: "text", Text: msg.Content})
+			for _, img := range msg.Images {
+				if img.Data != "" {
+					mediaType := img.MediaType
+					if mediaType == "" {
+						mediaType = "image/png"
+					}
+					content = append(content, anthropicContent{
+						Type: "image",
+						Source: &anthropicImageSource{
+							Type:      "base64",
+							MediaType: mediaType,
+							Data:      img.Data,
+						},
+					})
+				} else if img.URL != "" {
+					content = append(content, anthropicContent{Type: "text", Text: fmt.Sprintf("[Image: %s]", img.URL)})
+				}
+			}
 		}
 		result = append(result, anthropicMessage{Role: role, Content: content})
 	}
 	return systemPrompt, result
+}
+
+// buildAnthropicSystem builds the system prompt with cache_control markers.
+// The system prompt is sent as an array of content blocks with cache_control
+// to enable Anthropic's prompt caching (90% discount on cache reads).
+func buildAnthropicSystem(systemPrompt string) []anthropicSystemBlock {
+	if systemPrompt == "" {
+		return nil
+	}
+	return []anthropicSystemBlock{
+		{
+			Type: "text",
+			Text: systemPrompt,
+			CacheControl: &anthropicCacheControl{
+				Type: "ephemeral",
+			},
+		},
+	}
 }
 
 func convertAnthropicTools(tools []ToolDefinition) []anthropicTool {
@@ -175,7 +240,7 @@ func (p *AnthropicProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRes
 		Model:       req.Model,
 		MaxTokens:   maxTokens,
 		Messages:    messages,
-		System:      systemPrompt,
+		System:      buildAnthropicSystem(systemPrompt),
 		Temperature: req.Temperature,
 		Stream:      false,
 		Tools:       convertAnthropicTools(req.Tools),
@@ -207,7 +272,7 @@ func (p *AnthropicProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRes
 	}
 	defer resp.Body.Close()
 
-	respBody, err := ioutil.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -232,7 +297,17 @@ func (p *AnthropicProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRes
 		}
 	}
 
-	return &ChatResponse{Content: content, Provider: p.ID(), Model: req.Model}, nil
+	var usage *TokenUsage
+	if apiResp.Usage != nil {
+		usage = &TokenUsage{
+			PromptTokens:        apiResp.Usage.InputTokens,
+			CompletionTokens:    apiResp.Usage.OutputTokens,
+			CacheCreationTokens: apiResp.Usage.CacheCreationInputTokens,
+			CacheReadTokens:     apiResp.Usage.CacheReadInputTokens,
+		}
+	}
+
+	return &ChatResponse{Content: content, Provider: p.ID(), Model: req.Model, Usage: usage}, nil
 }
 
 func (p *AnthropicProvider) ChatStream(ctx context.Context, req ChatRequest) (<-chan StreamEvent, error) {
@@ -256,7 +331,7 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ChatRequest) (<-
 		Model:       req.Model,
 		MaxTokens:   maxTokens,
 		Messages:    messages,
-		System:      systemPrompt,
+		System:      buildAnthropicSystem(systemPrompt),
 		Temperature: req.Temperature,
 		Stream:      true,
 		Tools:       convertAnthropicTools(req.Tools),
@@ -296,7 +371,7 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ChatRequest) (<-
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			respBody, _ := ioutil.ReadAll(resp.Body)
+			respBody, _ := io.ReadAll(resp.Body)
 			ch <- StreamEvent{Type: "error", Content: fmt.Sprintf("API returned status %d: %s", resp.StatusCode, string(respBody))}
 			return
 		}
@@ -304,12 +379,18 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ChatRequest) (<-
 		var currentToolID string
 		var currentToolName string
 		var currentToolArgs strings.Builder
+		receivedDone := false
+		var lastUsage *TokenUsage
 
 		reader := bufio.NewReader(resp.Body)
 		for {
 			line, err := reader.ReadString('\n')
 			if err != nil {
-				if err != io.EOF && !strings.Contains(err.Error(), "use of closed network") {
+				if err == io.EOF {
+					if !receivedDone {
+						ch <- StreamEvent{Type: "error", Content: "stream ended unexpectedly (EOF without message_stop)"}
+					}
+				} else if !strings.Contains(err.Error(), "use of closed network") {
 					ch <- StreamEvent{Type: "error", Content: err.Error()}
 				}
 				break
@@ -351,8 +432,16 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ChatRequest) (<-
 					}
 				}
 			case "message_delta":
-				// usage info, stop reason
+				// Capture usage from message_delta event
+				if event.Usage != nil {
+					lastUsage = &TokenUsage{
+						PromptTokens:     event.Usage.InputTokens,
+						CompletionTokens: event.Usage.OutputTokens,
+						CacheReadTokens:  event.Usage.CacheReadInputTokens,
+					}
+				}
 			case "message_stop":
+				receivedDone = true
 				// Flush any pending tool call
 				if currentToolID != "" && currentToolName != "" {
 					ch <- StreamEvent{
@@ -369,7 +458,7 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ChatRequest) (<-
 						}},
 					}
 				}
-				ch <- StreamEvent{Type: "done"}
+				ch <- StreamEvent{Type: "done", Usage: lastUsage}
 				return
 			}
 		}
@@ -405,6 +494,7 @@ func (p *AnthropicProvider) ListModels(ctx context.Context) ([]Model, error) {
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", modelsURL, nil)
 	if err != nil {
+		log.Printf("[ListModels] request creation failed: %v", err)
 		return []Model{}, nil
 	}
 	httpReq.Header.Set("x-api-key", p.config.APIKey)
@@ -413,16 +503,19 @@ func (p *AnthropicProvider) ListModels(ctx context.Context) ([]Model, error) {
 	client := NewHTTPClient(p.timeout() / 4)
 	resp, err := client.Do(httpReq)
 	if err != nil {
+		log.Printf("[ListModels] request failed: %v", err)
 		return []Model{}, nil
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		log.Printf("[ListModels] unexpected status %d", resp.StatusCode)
 		return []Model{}, nil
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		log.Printf("[ListModels] read body failed: %v", err)
 		return []Model{}, nil
 	}
 
@@ -432,6 +525,7 @@ func (p *AnthropicProvider) ListModels(ctx context.Context) ([]Model, error) {
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
+		log.Printf("[ListModels] decode failed: %v", err)
 		return []Model{}, nil
 	}
 

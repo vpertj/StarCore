@@ -3,6 +3,7 @@ import { KEYS } from './constants.js'
 import { EventsOn, EventsOff, EventsEmit } from '../../wailsjs/runtime/runtime.js'
 import { activeProviderId, activeModelId, customModels, resolveModelProvider } from './provider.js'
 import { activeAgentId } from './agent.js'
+import { t } from './i18n.js'
  import { saveMessage, activeConversationId, saveConversation } from './memory.js'
  import { currentProject, activeFile } from './app.js'
  import { addLog } from './output.js'
@@ -40,7 +41,7 @@ export const messages = writable(/** @type {ChatMessage[]} */ ([]))
 export const isGenerating = writable(false)
 export const thinkingContent = writable('')
 export const contextFiles = writable(/** @type {string[]} */ ([]))
-export const contextCode = writable('')
+// contextCode was removed — unused dead code
 export const activeFileContent = writable('')
 export const selectedCode = writable('')
 export const aiMode = writable('chat')
@@ -56,23 +57,24 @@ export const loopExhausted = writable(/** @type {{maxLoops: number, mode: string
  */
 export function classifyError(err) {
   const msg = (typeof err === 'string' ? err : (err && err.message) || String(err)).toLowerCase()
+  const $t = get(t)
 
   if (msg.includes('401') || msg.includes('403') || msg.includes('unauthorized') || msg.includes('api key') || msg.includes('api密钥')) {
-    return { type: 'auth', title: 'API密钥无效', message: 'AI提供商认证失败，请检查API密钥配置。', action: 'settings', actionLabel: '前往设置' }
+    return { type: 'auth', title: $t('error.auth'), message: $t('error.auth'), action: 'settings', actionLabel: $t('settings.title') }
   }
   if (msg.includes('429') || msg.includes('rate limit') || msg.includes('too many requests')) {
-    return { type: 'rate_limit', title: '请求频率限制', message: 'AI服务请求过于频繁，请稍后重试。', action: 'retry', actionLabel: '稍后重试' }
+    return { type: 'rate_limit', title: $t('error.rateLimit'), message: $t('error.rateLimit'), action: 'retry', actionLabel: $t('ai.panel.send') }
   }
   if (msg.includes('context_length') || msg.includes('token limit') || msg.includes('上下文超限')) {
-    return { type: 'context_limit', title: '对话过长', message: '对话上下文超出模型限制，建议开始新对话。', action: 'new_chat', actionLabel: '开始新对话' }
+    return { type: 'context_limit', title: $t('error.contextTooLong'), message: $t('error.contextTooLong'), action: 'new_chat', actionLabel: $t('ai.panel.newChat') }
   }
   if (msg.includes('500') || msg.includes('502') || msg.includes('503') || msg.includes('504') || msg.includes('server error') || msg.includes('服务不可用')) {
-    return { type: 'service', title: 'AI服务暂时不可用', message: 'AI提供商服务异常，请稍后重试或切换提供商。', action: 'retry', actionLabel: '重试' }
+    return { type: 'service', title: $t('error.serverError'), message: $t('error.serverError'), action: 'retry', actionLabel: $t('ai.panel.send') }
   }
   if (msg.includes('network') || msg.includes('fetch') || msg.includes('timeout') || msg.includes('connection') || msg.includes('dns') || msg.includes('网络连接失败') || msg.includes('未返回任何响应')) {
-    return { type: 'network', title: '网络连接失败', message: '无法连接到AI服务，请检查网络设置。', action: 'retry', actionLabel: '重试' }
+    return { type: 'network', title: $t('error.network'), message: $t('error.network'), action: 'retry', actionLabel: $t('ai.panel.send') }
   }
-  return { type: 'unknown', title: 'AI请求失败', message: msg.slice(0, 200), action: 'retry', actionLabel: '重试' }
+  return { type: 'unknown', title: $t('error.serverError'), message: msg.slice(0, 200), action: 'retry', actionLabel: $t('ai.panel.send') }
 }
 
 /** @type {string|null} */ let lastUserMessage = null
@@ -81,14 +83,21 @@ export function retryLastMessage() {
   if (lastUserMessage) {
     const msg = lastUserMessage
     lastUserMessage = null
-    // Persist current messages, then clear without generating a new conversationId
     persistMessages().then(() => {
-      messages.set([])
+      const $messages = get(messages)
+      let cutIndex = $messages.length
+      for (let i = $messages.length - 1; i >= 0; i--) {
+        if ($messages[i].role === 'assistant' || $messages[i].role === 'tool') {
+          cutIndex = i
+        } else {
+          break
+        }
+      }
+      messages.set($messages.slice(0, cutIndex))
       toolCalls.set([])
       thinkingContent.set('')
       contextFiles.set([])
-      contextCode.set('')
-      // Keep the same conversationId so the retry is in the same conversation
+      // contextCode removed
       sendMessage(msg)
     })
   }
@@ -237,7 +246,6 @@ export async function clearMessages() {
   toolCalls.set([])
   thinkingContent.set('')
   contextFiles.set([])
-  contextCode.set('')
   lastUserMessage = null
   // Generate a fresh conversation ID for the new chat
   activeConversationId.set('conv_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8))
@@ -257,6 +265,18 @@ export function saveAIConfig(config) {
  * @param {string} callId
  */
 export async function approveToolCall(callId) {
+  const calls = get(toolCalls)
+  const call = calls.find(c => c.id === callId)
+  if (call && call.name === 'write_file' && call.args?.path && call.args?.content) {
+    try {
+      const { addPendingDiff } = await import('../stores/diffPreview.js')
+      let oldContent = ''
+      try { oldContent = await window.backend.ReadFile(call.args.path) } catch {}
+      if (oldContent !== call.args.content) {
+        await addPendingDiff(call.args.path, call.args.content)
+      }
+    } catch {}
+  }
   toolCalls.update(cs => cs.map(c => c.id === callId ? { ...c, status: 'executing' } : c))
   EventsEmit('tool:approve:' + callId, true)
   if (window.backend?.RespondToolApproval) {
@@ -315,8 +335,6 @@ export async function sendMessage(content, attachedFiles) {
   const resolved = resolveModelProvider(modelCompositeId, rawProviderId, customModels)
   const providerId = resolved.providerId
   const model = resolved.model
-  console.log('[sendMessage] provider:', providerId, 'model:', model, 'hasApiKey:', !!resolved.apiKey, 'hasEndpoint:', !!resolved.endpoint)
-
   if (resolved.apiKey || resolved.endpoint) {
     try {
       /** @type {{id:string, name:string, enabled:boolean, apiKey?:string, endpoint?:string}} */
@@ -403,7 +421,7 @@ export async function sendMessage(content, attachedFiles) {
       let pendingChunk = ''
       let rafId = /** @type {number|null} */ (null)
       let firstChunkReceived = false
-      const STREAM_TIMEOUT_MS = 120000
+      const STREAM_TIMEOUT_MS = 240000
       const FIRST_CHUNK_TIMEOUT_MS = 30000
       let /** @type {number|null} */ streamTimeoutId = null
       let /** @type {number|null} */ firstChunkTimeoutId = null
@@ -412,7 +430,7 @@ export async function sendMessage(content, attachedFiles) {
         if (streamTimeoutId) clearTimeout(streamTimeoutId)
         streamTimeoutId = setTimeout(() => {
           cleanup()
-          updateLastMessage('⚠️ 请求超时：30秒内未收到AI响应。\n\n可能原因：\n1. 网络连接问题\n2. AI服务暂时不可用\n3. API密钥无效\n\n请检查网络或尝试重新发送。')
+          updateLastMessage('⚠️ 请求超时：4分钟内未收到AI响应。\n\n可能原因：\n1. 网络连接问题\n2. AI服务暂时不可用\n3. API密钥无效\n4. 模型推理时间过长\n\n请检查网络或尝试重新发送。')
         }, STREAM_TIMEOUT_MS)
       }
 
@@ -454,27 +472,41 @@ export async function sendMessage(content, attachedFiles) {
         }
       })
 
-      const offDone = EventsOn(doneEvent, () => {
+      const offDone = EventsOn(doneEvent, (/** @type {any} */ data) => {
         if (streamTimeoutId) { clearTimeout(streamTimeoutId); streamTimeoutId = null }
         if (firstChunkTimeoutId) { clearTimeout(firstChunkTimeoutId); firstChunkTimeoutId = null }
         if (rafId) {
           cancelAnimationFrame(rafId)
           rafId = null
         }
-        // Accumulate token usage in localStorage as fallback
-        try {
-          const userMsg = chatMessages.filter(m => m.role === 'user').pop()
-          const inputLen = userMsg?.content?.length || 0
-          const outputLen = assistantMessage.length
-          if (inputLen > 0 || outputLen > 0) {
+        // Capture actual usage from API if available
+        const usage = data?.usage
+        if (usage && usage.prompt_tokens > 0) {
+          try {
             const key = 'starcore-token-usage'
-            const saved = JSON.parse(localStorage.getItem(key) || '{"tokensIn":0,"tokensOut":0,"count":0}')
-            saved.tokensIn += Math.round(inputLen * 0.3)
-            saved.tokensOut += Math.round(outputLen * 0.3)
+            const saved = JSON.parse(localStorage.getItem(key) || '{"tokensIn":0,"tokensOut":0,"cachedTokens":0,"cost":0,"count":0}')
+            saved.tokensIn += usage.prompt_tokens || 0
+            saved.tokensOut += usage.completion_tokens || 0
+            saved.cachedTokens = (saved.cachedTokens || 0) + (usage.cached_tokens || 0)
             saved.count++
             localStorage.setItem(key, JSON.stringify(saved))
-          }
-        } catch {}
+          } catch {}
+        } else {
+          // Fallback to estimation
+          try {
+            const userMsg = chatMessages.filter(m => m.role === 'user').pop()
+            const inputLen = userMsg?.content?.length || 0
+            const outputLen = assistantMessage.length
+            if (inputLen > 0 || outputLen > 0) {
+              const key = 'starcore-token-usage'
+              const saved = JSON.parse(localStorage.getItem(key) || '{"tokensIn":0,"tokensOut":0,"cachedTokens":0,"cost":0,"count":0}')
+              saved.tokensIn += Math.round(inputLen * 0.3)
+              saved.tokensOut += Math.round(outputLen * 0.3)
+              saved.count++
+              localStorage.setItem(key, JSON.stringify(saved))
+            }
+          } catch {}
+        }
         flushUpdate()
         connectionStatus.set('ok')
         cleanup()
@@ -622,18 +654,41 @@ export async function persistMessages() {
     const convId = get(activeConversationId)
     const msgs = get(messages)
     if (!convId || msgs.length === 0) return
+    let seq = 0
     for (let i = 0; i < msgs.length; i++) {
       await saveMessage({
-        id: `${convId}-${i}`,
+        id: `${convId}-${seq}`,
         conversationId: convId,
-        seq: i,
+        seq,
         role: msgs[i].role,
         content: msgs[i].content,
         thinking: '',
         tokensIn: 0,
         tokensOut: 0,
-        createdAt: new Date(msgs[i].timestamp).toISOString()
+        createdAt: new Date(msgs[i].timestamp).toISOString(),
+        metadata: msgs[i].toolCalls ? JSON.stringify(msgs[i].toolCalls) : ''
       })
+      seq++
+    }
+    const calls = get(toolCalls)
+    if (calls.length > 0) {
+      for (const call of calls) {
+        if (call.status === 'completed' || call.status === 'error') {
+          await saveMessage({
+            id: `${convId}-tool-${call.id}`,
+            conversationId: convId,
+            seq,
+            role: 'tool',
+            content: call.result || call.error || '',
+            thinking: '',
+            tokensIn: 0,
+            tokensOut: 0,
+            createdAt: new Date().toISOString(),
+            metadata: JSON.stringify({ name: call.name, args: call.args, status: call.status, fileMeta: call.fileMeta })
+          })
+          seq++
+        }
+      }
     }
     const lastMsg = msgs[msgs.length - 1]
     if (lastMsg) {
@@ -650,6 +705,19 @@ export async function persistMessages() {
         updatedAt: new Date(lastMsg.timestamp).toISOString(),
         messageCount: msgs.length
       })
+      if (window.backend?.SaveSessionState) {
+        await window.backend.SaveSessionState({
+          activeConvId: convId,
+          projectPath: proj,
+          agentId: get(activeAgentId) || '',
+          mode: get(masterMode) ? 'build' : 'chat',
+          providerId: get(activeProviderId) || '',
+          model: get(activeModelId) || '',
+          lastMessageAt: new Date(lastMsg.timestamp).toISOString(),
+          crashed: false,
+          savedAt: new Date().toISOString()
+        })
+      }
     }
   } catch (/** @type {any} */ e) {
     console.error('Failed to persist messages:', e)

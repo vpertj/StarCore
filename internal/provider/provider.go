@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 )
 
 type Message struct {
@@ -12,6 +13,14 @@ type Message struct {
 	ToolCallID string                     `json:"tool_call_id,omitempty"`
 	Name       string                     `json:"name,omitempty"`
 	Extra      map[string]json.RawMessage `json:"-"`
+	Images     []ImageContent             `json:"-"`
+}
+
+type ImageContent struct {
+	Type      string `json:"type"`
+	URL       string `json:"url,omitempty"`
+	MediaType string `json:"mediaType,omitempty"`
+	Data      string `json:"data,omitempty"`
 }
 
 // MarshalJSON merges Extra fields into the serialized output, so any
@@ -22,6 +31,40 @@ func (m Message) MarshalJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	if len(m.Images) > 0 {
+		var base map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &base); err != nil {
+			return raw, nil
+		}
+
+		var contentParts []map[string]any
+		if m.Content != "" {
+			contentParts = append(contentParts, map[string]any{"type": "text", "text": m.Content})
+		}
+		for _, img := range m.Images {
+			if img.URL != "" {
+				contentParts = append(contentParts, map[string]any{
+					"type":      "image_url",
+					"image_url": map[string]string{"url": img.URL},
+				})
+			} else if img.Data != "" {
+				mediaType := img.MediaType
+				if mediaType == "" {
+					mediaType = "image/png"
+				}
+				contentParts = append(contentParts, map[string]any{
+					"type":      "image_url",
+					"image_url": map[string]string{"url": fmt.Sprintf("data:%s;base64,%s", mediaType, img.Data)},
+				})
+			}
+		}
+
+		contentJSON, _ := json.Marshal(contentParts)
+		base["content"] = contentJSON
+		return json.Marshal(base)
+	}
+
 	if len(m.Extra) == 0 {
 		return raw, nil
 	}
@@ -74,12 +117,32 @@ type ChatRequest struct {
 	Tools             []ToolDefinition `json:"tools,omitempty"`
 	Mode              string           `json:"mode,omitempty"`
 	ConversationID    string           `json:"conversationId,omitempty"`
+	Attachments       []Attachment     `json:"attachments,omitempty"`
+}
+
+type Attachment struct {
+	Type     string `json:"type"`
+	Name     string `json:"name"`
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"`
+	URL      string `json:"url,omitempty"`
+}
+
+// TokenUsage tracks token consumption and caching metrics.
+type TokenUsage struct {
+	PromptTokens        int `json:"prompt_tokens"`
+	CompletionTokens    int `json:"completion_tokens"`
+	TotalTokens         int `json:"total_tokens"`
+	CachedTokens        int `json:"cached_tokens,omitempty"`
+	CacheCreationTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadTokens     int `json:"cache_read_input_tokens,omitempty"`
 }
 
 type ChatResponse struct {
-	Content  string `json:"content"`
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
+	Content  string      `json:"content"`
+	Provider string      `json:"provider"`
+	Model    string      `json:"model"`
+	Usage    *TokenUsage `json:"usage,omitempty"`
 }
 
 type CompletionRequest struct {
@@ -103,6 +166,7 @@ type StreamEvent struct {
 	Result     string                     `json:"result,omitempty"`
 	ToolCalls  []ToolCall                 `json:"tool_calls,omitempty"`
 	ToolCallID string                     `json:"tool_call_id,omitempty"`
+	Usage      *TokenUsage                `json:"usage,omitempty"`
 	Extra      map[string]json.RawMessage `json:"-"`
 }
 

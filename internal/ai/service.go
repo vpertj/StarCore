@@ -13,6 +13,7 @@ import (
 	agentTools "StarCore/internal/agent/tools"
 	"StarCore/internal/memory"
 	"StarCore/internal/provider"
+	"StarCore/internal/sandbox"
 )
 
 const maxToolResultChars = 8000
@@ -29,32 +30,30 @@ func calcMaxAgentLoops(mode, model string) int {
 
 	switch mode {
 	case "chat":
-		return 10
+		return 15
 	case "plan":
-		return 25
+		return 35
 	case "build":
-		// Scale with context window: 32K→15, 128K→40, 200K→50, 1M→60
 		switch {
 		case ctxWindow >= 500000:
-			return 60
+			return 80
+		case ctxWindow >= 200000:
+			return 65
+		case ctxWindow >= 128000:
+			return 50
+		case ctxWindow >= 64000:
+			return 35
+		default:
+			return 20
+		}
+	default:
+		switch {
 		case ctxWindow >= 200000:
 			return 50
 		case ctxWindow >= 128000:
 			return 40
-		case ctxWindow >= 64000:
+		default:
 			return 25
-		default:
-			return 15
-		}
-	default:
-		// Unknown mode — use a reasonable default
-		switch {
-		case ctxWindow >= 200000:
-			return 40
-		case ctxWindow >= 128000:
-			return 30
-		default:
-			return 20
 		}
 	}
 }
@@ -74,6 +73,9 @@ type ContextWindowEstimator func(providerID, modelID string) int
 // ContextProvider returns the Wails application context.
 type ContextProvider func() context.Context
 
+// VerifyFunc runs verification on modified files and returns a summary.
+type VerifyFunc func(ctx context.Context, filePaths []string) string
+
 // Service manages AI chat, streaming, and agent loop execution.
 type Service struct {
 	providerMgr *provider.Manager
@@ -88,12 +90,16 @@ type Service struct {
 	appCtx        ContextProvider
 
 	loopState *agentTools.LoopState
+	verifyFn  VerifyFunc
+	cb        *CircuitBreaker
+	sem       chan struct{}
 
-	mu            sync.Mutex
-	cancel        context.CancelFunc
-	fingerprints  []string
-	currentConvID string
-	continueCh    chan int // frontend can send extra loops via this channel
+	mu                sync.Mutex
+	cancel            context.CancelFunc
+	fingerprints      []string
+	currentConvID     string
+	continueCh        chan int
+	autoContinueCount int // frontend can send extra loops via this channel
 }
 
 // NewService creates a new AI service.
@@ -107,6 +113,7 @@ func NewService(
 	compress Compressor,
 	contextWindow ContextWindowEstimator,
 	appCtx ContextProvider,
+	verifyFn VerifyFunc,
 ) *Service {
 	ls := agentTools.NewLoopState()
 	agentTools.LoopStateRef = ls
@@ -121,7 +128,10 @@ func NewService(
 		contextWindow: contextWindow,
 		appCtx:        appCtx,
 		loopState:     ls,
+		verifyFn:      verifyFn,
 		continueCh:    make(chan int, 1),
+		cb:            NewCircuitBreaker(10, 60*time.Second),
+		sem:           make(chan struct{}, 3),
 	}
 }
 
@@ -173,15 +183,20 @@ func executeToolWithTimeout(ctx context.Context, executor *agent.ToolExecutor, c
 		result *agent.ToolResult
 		err    error
 	}
+	toolCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	ch := make(chan toolResponse, 1)
 	go func() {
-		r, e := executor.Execute(ctx, call)
-		ch <- toolResponse{r, e}
+		r, e := executor.Execute(toolCtx, call)
+		select {
+		case ch <- toolResponse{r, e}:
+		case <-toolCtx.Done():
+		}
 	}()
 	select {
 	case resp := <-ch:
 		return resp.result, resp.err
-	case <-time.After(timeout):
+	case <-toolCtx.Done():
 		return nil, fmt.Errorf("tool execution timed out after %v", timeout)
 	}
 }
@@ -189,14 +204,15 @@ func executeToolWithTimeout(ctx context.Context, executor *agent.ToolExecutor, c
 func preCheckProvider(providerMgr *provider.Manager, providerID string) error {
 	p, err := providerMgr.Get(providerID)
 	if err != nil {
-		return fmt.Errorf("未找到AI提供商: %s", providerID)
+		return fmt.Errorf("%s: %s", provider.T("no_provider"), providerID)
 	}
 	cfg := p.GetConfig()
-	if cfg.APIKey == "" && providerID != "ollama" {
-		return fmt.Errorf("API密钥未配置，请前往设置配置 %s 的API密钥", providerID)
+	_, isOllama := p.(*provider.OllamaProvider)
+	if cfg.APIKey == "" && !isOllama {
+		return fmt.Errorf("%s %s", provider.T("auth_failed"), providerID)
 	}
 	if cfg.Endpoint == "" {
-		return fmt.Errorf("API端点未配置，请前往设置配置 %s 的端点地址", providerID)
+		return fmt.Errorf("%s %s", provider.T("no_endpoint"), providerID)
 	}
 	return nil
 }
@@ -248,11 +264,10 @@ func buildToolSuppressHint(msgs []provider.Message) string {
 			return ""
 		}
 	}
-	return "\n\n注意：用户的消息是简单的问候或提问，直接用文字回复，不要调用任何工具或读取文件，对话式回答即可。"
+	return prompt("suppress_hint")
 }
 
-const languageHint = `用和用户相同的语言回答。用户用中文提问就用中文回答，用户用英文提问就用英文回答。
-`
+var languageHint = prompt("language_hint")
 
 // --- 规划模式 ---
 // 对标 Cursor Plan Mode：只读分析，输出结构化的实施方案。
@@ -290,6 +305,7 @@ const planModePrompt = `
 - 如果用户需求模糊，先列出澄清问题再继续
 - 以 --- 规划完成 --- 作为结尾标记
 - 此模式下绝对禁止使用 write_file、execute_command 等修改性工具
+- 输出完整方案后立即结束，不要等待系统提示
 `
 
 // --- 构建模式 ---
@@ -335,6 +351,12 @@ const buildModePrompt = `
 - 不要添加任务范围外的"顺便改"优化（除非是明显的安全问题）
 - 一次 commit 做一件事，不要混在一起
 - 修改完立即验证，不要等所有改动做完再一起测
+
+## 何时结束
+- 所有代码改动已验证通过
+- 用户需求已全部实现
+- 此时直接输出完成总结，不要等待系统提示
+- 如果你认为任务已完成但系统要求继续，确认是否还有遗漏的工作
 `
 
 // --- 对话模式 ---
@@ -377,12 +399,22 @@ func (s *Service) ChatStream(req provider.ChatRequest) error {
 	s.cancel = cancel
 	s.mu.Unlock()
 
+	select {
+	case s.sem <- struct{}{}:
+	default:
+		s.emitFn("ai:stream:error", provider.T("concurrency_limit"))
+		cancel()
+		return fmt.Errorf("concurrency limit reached")
+	}
+	defer func() { <-s.sem }()
+
 	// Reset loop state when starting a new conversation
 	if req.ConversationID != "" && req.ConversationID != s.currentConvID {
 		s.mu.Lock()
 		s.currentConvID = req.ConversationID
 		s.loopState.Reset()
 		s.fingerprints = nil
+		s.autoContinueCount = 0
 		s.mu.Unlock()
 	}
 
@@ -391,7 +423,7 @@ func (s *Service) ChatStream(req provider.ChatRequest) error {
 		if defProvider != nil {
 			req.ProviderID = defProvider.ID()
 		} else {
-			s.emitFn("ai:stream:error", "未配置AI提供商，请先在设置中配置API密钥")
+			s.emitFn("ai:stream:error", provider.T("no_provider"))
 			return fmt.Errorf("no provider configured")
 		}
 	}
@@ -446,6 +478,46 @@ func (s *Service) ChatStream(req provider.ChatRequest) error {
 	contextMsg := s.buildContext(req)
 	if contextMsg != "" {
 		req.Messages = append([]provider.Message{{Role: "system", Content: contextMsg}}, req.Messages...)
+	}
+
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		if req.Messages[i].Role == "user" {
+			risk := sandbox.DetectPromptInjection(req.Messages[i].Content)
+			if risk.Detected {
+				s.emitFn("ai:stream:injection_warning", risk)
+			}
+			req.Messages[i].Content = sandbox.SanitizeUserInput(req.Messages[i].Content)
+			break
+		}
+	}
+
+	if len(req.Attachments) > 0 {
+		for i := len(req.Messages) - 1; i >= 0; i-- {
+			if req.Messages[i].Role == "user" {
+				images := make([]provider.ImageContent, 0, len(req.Attachments))
+				for _, att := range req.Attachments {
+					if att.Type == "image" {
+						img := provider.ImageContent{Type: "image"}
+						if att.URL != "" {
+							img.URL = att.URL
+						} else if att.Data != "" {
+							img.Data = att.Data
+							img.MediaType = att.MimeType
+							if img.MediaType == "" {
+								img.MediaType = "image/png"
+							}
+						}
+						if img.URL != "" || img.Data != "" {
+							images = append(images, img)
+						}
+					}
+				}
+				if len(images) > 0 {
+					req.Messages[i].Images = images
+				}
+				break
+			}
+		}
 	}
 
 	modelCtxWindow := s.contextWindow(req.ProviderID, req.Model)
@@ -592,6 +664,10 @@ func (s *Service) isRepeatedLoop(current []provider.ToolCall) bool {
 
 // retryableChatStream performs a ChatStream with retry on transient failures.
 func (s *Service) retryableChatStream(roundCtx context.Context, req provider.ChatRequest) (<-chan provider.StreamEvent, error) {
+	if !s.cb.Allow() {
+		return nil, fmt.Errorf("AI服务断路器已打开，请稍后重试（连续失败%d次后自动恢复）", s.cb.MaxFailures)
+	}
+
 	maxRetries := 5
 	delays := []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second}
 
@@ -603,6 +679,7 @@ func (s *Service) retryableChatStream(roundCtx context.Context, req provider.Cha
 
 		diag := provider.DiagnoseError(err)
 		if !diag.Retryable || attempt == maxRetries {
+			s.cb.RecordFailure()
 			return nil, err
 		}
 
@@ -616,6 +693,7 @@ func (s *Service) retryableChatStream(roundCtx context.Context, req provider.Cha
 		}
 	}
 
+	s.cb.RecordFailure()
 	return nil, fmt.Errorf("重试%d次后仍然失败", maxRetries)
 }
 
@@ -636,6 +714,8 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 	}()
 
 	var prevMsgCount int
+	var nudgeCount int
+	const maxNudges = 2
 	maxLoops := calcMaxAgentLoops(req.Mode, req.Model)
 	warningAt := maxLoops - 3
 	if warningAt < 1 {
@@ -665,9 +745,10 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 			})
 		}
 
-		roundCtx, roundCancel := context.WithTimeout(ctx, 180*time.Second)
+		roundCtx, roundCancel := context.WithTimeout(ctx, 300*time.Second)
 		eventCh, err := s.retryableChatStream(roundCtx, currentReq)
 		if err != nil {
+			s.cb.RecordFailure()
 			userMsg := provider.ClassifyProviderError(err)
 			if userMsg == "" {
 				userMsg = err.Error()
@@ -684,6 +765,9 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 		var toolCalls []provider.ToolCall
 		toolCallsSeen := false
 		streamReceivedAny := false
+		streamRetryCount := 0
+
+		var streamUsage *provider.TokenUsage
 
 		for event := range eventCh {
 			streamReceivedAny = true
@@ -715,6 +799,16 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 				if userMsg == "" {
 					userMsg = event.Content
 				}
+				if streamRetryCount < 1 {
+					streamRetryCount++
+					s.emitFn("ai:stream:data", map[string]any{"content": "\n⚠️ 流式传输中断，正在重试...\n"})
+					roundCancel()
+					retryEventCh, retryErr := s.retryableChatStream(ctx, currentReq)
+					if retryErr == nil && retryEventCh != nil {
+						eventCh = retryEventCh
+						continue
+					}
+				}
 				s.emitFn("ai:stream:error", userMsg)
 				roundCancel()
 				doneEmitted = true
@@ -735,6 +829,10 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 					toolCallsSeen = true
 				}
 			case "done":
+				// Capture usage from stream
+				if event.Usage != nil {
+					streamUsage = event.Usage
+				}
 				// Stream completed normally. If no tool calls and no content,
 				// try a non-streaming fallback. Otherwise just mark for exit.
 				if !toolCallsSeen && assistantContent == "" {
@@ -756,26 +854,46 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 
 		// Record token usage for THIS round only (delta, not cumulative history)
 		if s.memoryStore != nil && streamReceivedAny {
-			// Count only messages newly added this round (prompt tokens)
-			estimatedTokensIn := 0
-			currentMsgs := currentReq.Messages
-			for i := prevMsgCount; i < len(currentMsgs) && i >= 0; i++ {
-				estimatedTokensIn += estimateTokens(currentMsgs[i].Content)
+			var tokensIn, tokensOut int
+			var cachedTokens int
+
+			if streamUsage != nil && streamUsage.PromptTokens > 0 {
+				// Use actual API usage data
+				tokensIn = streamUsage.PromptTokens
+				tokensOut = streamUsage.CompletionTokens
+				cachedTokens = streamUsage.CachedTokens
+			} else {
+				// Fall back to estimation
+				currentMsgs := currentReq.Messages
+				for i := prevMsgCount; i < len(currentMsgs) && i >= 0; i++ {
+					tokensIn += estimateTokens(currentMsgs[i].Content)
+				}
+				tokensOut = estimateTokens(assistantContent)
 			}
-			prevMsgCount = len(currentMsgs)
-			// Count response tokens
-			estimatedTokensOut := estimateTokens(assistantContent)
-			if estimatedTokensIn > 0 || estimatedTokensOut > 0 {
+			prevMsgCount = len(currentReq.Messages)
+
+			if tokensIn > 0 || tokensOut > 0 {
+				cost := provider.CalculateCost(currentReq.Model, &provider.TokenUsage{
+					PromptTokens:     tokensIn,
+					CompletionTokens: tokensOut,
+					CachedTokens:     cachedTokens,
+				})
+				cacheSavings := provider.CalculateCacheSavings(currentReq.Model, &provider.TokenUsage{
+					PromptTokens:  tokensIn,
+					CachedTokens:  cachedTokens,
+				})
+
 				usageEntry := &memory.TokenUsageEntry{
 					ID:             fmt.Sprintf("tu_%d", time.Now().UnixNano()),
 					ConversationID: currentReq.ConversationID,
 					ProviderID:     currentReq.ProviderID,
 					Model:          currentReq.Model,
-					TokensIn:       estimatedTokensIn,
-					TokensOut:      estimatedTokensOut,
-					Cost:           0,
+					TokensIn:       tokensIn,
+					TokensOut:      tokensOut,
+					Cost:           cost,
 					CreatedAt:      time.Now().Format(time.RFC3339),
 				}
+				_ = cacheSavings // TODO: store in entry when schema is extended
 				go s.memoryStore.SaveTokenUsage(usageEntry)
 			}
 		}
@@ -783,15 +901,14 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 		roundCancel()
 
 		if !streamReceivedAny {
-			s.emitFn("ai:stream:error", "AI服务未返回任何响应，请检查网络连接或API配置")
+			s.cb.RecordFailure()
+			s.emitFn("ai:stream:error", provider.T("no_response"))
 			doneEmitted = true
 			return
 		}
 
 		if !toolCallsSeen {
-			// No tool calls — AI is done talking. Emit and exit.
-			// If content was received via stream, it's already been emitted.
-			// If stream returned nothing, try one non-streaming fallback.
+			s.cb.RecordSuccess()
 			if assistantContent == "" {
 				fallbackCtx, fbCancel := context.WithTimeout(ctx, 60*time.Second)
 				noToolReq := currentReq
@@ -803,12 +920,90 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 					assistantContent = resp.Content
 					s.emitFn("ai:stream:data", resp.Content)
 				} else {
-					s.emitFn("ai:stream:error", "AI未返回任何内容。请检查网络连接或尝试换个问题。")
+					s.emitFn("ai:stream:error", provider.T("no_content"))
 					doneEmitted = true
 					return
 				}
 			}
-			s.emitFn("ai:stream:done", "")
+
+			if req.Mode == "build" || req.Mode == "plan" {
+				// Check if AI seems to have completed its task
+				completionSignals := []string{
+					"已完成", "完成", "任务完成", "总结", "总结如下", "以上是",
+					"done", "completed", "finished", "summary", "in summary",
+					"---", "规划完成", "实施计划", "风险与依赖",
+				}
+				lowerContent := strings.ToLower(assistantContent)
+				isComplete := false
+				for _, signal := range completionSignals {
+					if strings.Contains(lowerContent, signal) {
+						isComplete = true
+						break
+					}
+				}
+
+				// Check if this is a non-technical response (greeting, question, etc.)
+				// that doesn't require tool calls
+				isNonTechnical := false
+				lastUserMsg := ""
+				for i := len(currentReq.Messages) - 1; i >= 0; i-- {
+					if currentReq.Messages[i].Role == "user" {
+						lastUserMsg = strings.ToLower(currentReq.Messages[i].Content)
+						break
+					}
+				}
+				nonTechnicalPatterns := []string{
+					"你好", "hello", "hi", "嗨", "hey",
+					"谢谢", "thanks", "thank you",
+					"什么是", "怎么理解", "解释一下", "是什么意思",
+					"what is", "how does", "explain", "what does",
+				}
+				for _, pattern := range nonTechnicalPatterns {
+					if strings.Contains(lastUserMsg, pattern) {
+						isNonTechnical = true
+						break
+					}
+				}
+
+				// Also check if response is short and non-actionable (<200 chars, no file paths)
+				isShortResponse := len(assistantContent) < 200 && !strings.Contains(assistantContent, "/") && !strings.Contains(assistantContent, "```")
+
+				// If AI seems to have completed, or this is a non-technical exchange, don't push for tools
+				if isComplete || isNonTechnical || isShortResponse {
+					donePayload := map[string]interface{}{}
+					if streamUsage != nil {
+						donePayload["usage"] = streamUsage
+					}
+					s.emitFn("ai:stream:done", donePayload)
+					doneEmitted = true
+					return
+				}
+
+				// Only nudge if we haven't nudged too many times
+				if !toolCallsSeen && assistantContent != "" && nudgeCount < maxNudges {
+					nudgeCount++
+					toolNames := make([]string, 0, len(currentReq.Tools))
+					for _, t := range currentReq.Tools {
+						toolNames = append(toolNames, t.Function.Name)
+					}
+					currentReq.Messages = append(currentReq.Messages, provider.Message{
+						Role:    "assistant",
+						Content: assistantContent,
+					})
+					currentReq.Messages = append(currentReq.Messages, provider.Message{
+						Role:    "user",
+						Content: fmt.Sprintf("你的回复中没有调用工具。如果任务尚未完成，请直接调用工具继续执行（可用工具: %s）。如果任务已完成，请在回复中明确说明。", strings.Join(toolNames, ", ")),
+					})
+					s.emitFn("ai:stream:data", "\n\n*[系统: 等待工具调用...]*")
+					continue
+				}
+			}
+
+			donePayload := map[string]interface{}{}
+			if streamUsage != nil {
+				donePayload["usage"] = streamUsage
+			}
+			s.emitFn("ai:stream:done", donePayload)
 			doneEmitted = true
 			return
 		}
@@ -831,7 +1026,7 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 			calls = append(calls, call)
 		}
 
-		agentTools.SubAgentCurrentProviderID = currentReq.ProviderID
+		agentTools.SetSubAgentProviderID(currentReq.ProviderID)
 
 		if len(calls) > 0 {
 			type toolRes struct {
@@ -898,6 +1093,7 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 		}
 
 		// Track files touched by write/edit tools
+		var modifiedFiles []string
 		for _, tc := range toolCalls {
 			switch tc.Function.Name {
 			case "write_file", "edit_file":
@@ -907,14 +1103,39 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 				}
 				if path, ok := args["path"].(string); ok && path != "" {
 					s.loopState.AddFileTouched(path)
+					modifiedFiles = append(modifiedFiles, path)
 				}
+			}
+		}
+
+		// Auto-verify after file modifications in build mode
+		if len(modifiedFiles) > 0 && s.verifyFn != nil && req.Mode == "build" {
+			verifyCtx, verifyCancel := context.WithTimeout(ctx, 60*time.Second)
+			verifySummary := s.verifyFn(verifyCtx, modifiedFiles)
+			verifyCancel()
+			if verifySummary != "" {
+				s.emitFn("ai:stream:verify", map[string]any{
+					"files":   modifiedFiles,
+					"summary": verifySummary,
+				})
+				currentReq.Messages = append(currentReq.Messages, provider.Message{
+					Role:    "system",
+					Content: fmt.Sprintf("[自动验证结果]\n%s\n如果验证失败，请分析错误原因并修复代码。", verifySummary),
+				})
 			}
 		}
 
 		if assistantContent == "" && len(toolCalls) > 0 {
 			currentReq.Messages = append(currentReq.Messages, provider.Message{
 				Role:    "system",
-				Content: "ä½ è°ƒç”¨äº†å·¥å…·ä½†æ²¡æœ‰è§£é‡Šåœ¨åšä»€ä¹ˆã€‚è¯·åœ¨å·¥å…·è°ƒç”¨å‰åŽè¯´æ˜Žä½ çš„æŽ¨ç†ï¼Œç®€è¦æ»ç»“ä½ åšäº†ä»€ä¹ˆä»¥åŠ ä¸ºä»€ä¹ˆã€‚",
+				Content: "你调用了工具但没有解释在做什么。请在工具调用前说明你的推理，简要总结你做了什么以及为什么。",
+			})
+		}
+
+		if len(toolCalls) > 0 && assistantContent == "" && s.isRepeatedLoop(toolCalls) {
+			currentReq.Messages = append(currentReq.Messages, provider.Message{
+				Role:    "system",
+				Content: "你似乎陷入了重复模式。请回顾你的目标，尝试不同的方式：读取其他文件、换一个搜索策略、或者先分析当前进展再决定下一步。",
 			})
 		}
 
@@ -933,6 +1154,15 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 				Content: fmt.Sprintf("[系统提醒] 还剩%d轮执行。如果任务尚未完成，请：1) 总结当前进度和已完成的变更；2) 说明剩余工作；3) 尽快完成最关键的操作。如果无法完成，给出清晰的续接指引。", remaining),
 			})
 		}
+
+		// Auto-continue when loop limit reached (up to 3 times)
+		if loop+1 >= maxLoops && s.autoContinueCount < 3 {
+			s.autoContinueCount++
+			extra := 20
+			maxLoops = maxLoops + extra
+			warningAt = maxLoops - 3
+			s.emitFn("ai:stream:data", fmt.Sprintf("\n\n*循环达到上限，自动追加%d轮继续执行（第%d次自动继续，最多3次）*", extra, s.autoContinueCount))
+		}
 	}
 
 	// Agent loop exhausted — save progress and notify frontend
@@ -950,9 +1180,10 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 	}
 
 	s.emitFn("ai:stream:loop_exhausted", map[string]any{
-		"maxLoops": maxLoops,
-		"mode":     req.Mode,
-		"progress": progressSummary,
+		"maxLoops":      maxLoops,
+		"mode":          req.Mode,
+		"progress":      progressSummary,
+		"autoContinued": s.autoContinueCount,
 	})
 	s.emitFn("ai:stream:done", "")
 	doneEmitted = true

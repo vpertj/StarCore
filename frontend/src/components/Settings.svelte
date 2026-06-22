@@ -5,6 +5,7 @@
   import { aiConfig } from "../stores/ai.js";
   import { currentTheme, setTheme, themes } from "../stores/theme.js";
   import { currentLang, setLang, t } from "../stores/i18n.js";
+  import { KEYS } from "../stores/constants.js";
   import {
     editorSettings,
     updateEditorSetting,
@@ -152,7 +153,9 @@
     wordWrap: true,
     lineNumbers: true,
     minimap: false,
-    autoSave: false,
+    autoSave: true,
+    autoSaveDelay: 1000,
+    formatOnSave: true,
     terminalFontSize: 14,
     terminalFontFamily: "Cascadia Code",
     provider: "openai",
@@ -183,6 +186,11 @@
   function saveSettings() {
     localStorage.setItem("starcore-settings", JSON.stringify(settings));
     syncAiConfig();
+    if (settings.theme) {
+      setTheme(settings.theme);
+    }
+    updateEditorSetting('autoSave', settings.autoSave)
+    updateEditorSetting('autoSaveDelay', settings.autoSaveDelay || 1000)
   }
 
   function loadSettings() {
@@ -192,6 +200,19 @@
     }
     syncAiConfig();
     applyUIFont();
+    const savedTheme = localStorage.getItem(KEYS.THEME) || settings.theme;
+    if (savedTheme) {
+      settings.theme = savedTheme;
+      setTheme(savedTheme);
+    }
+    settings.fontSize = $editorSettings.fontSize || settings.fontSize;
+    settings.fontFamily = ($editorSettings.fontFamily || '').replace(/'/g, '').split(',')[0].trim() || settings.fontFamily;
+    settings.wordWrap = $editorSettings.wordWrap ?? settings.wordWrap;
+    settings.lineNumbers = $editorSettings.showLineNumbers ?? settings.lineNumbers;
+    settings.minimap = $editorSettings.showMinimap ?? settings.minimap;
+    settings.autoSave = $editorSettings.autoSave ?? settings.autoSave;
+    settings.autoSaveDelay = $editorSettings.autoSaveDelay ?? settings.autoSaveDelay;
+    settings.formatOnSave = $editorSettings.formatOnSave ?? settings.formatOnSave;
   }
 
   // Apply UI font family on load
@@ -336,6 +357,35 @@
                     >{$t("settings.general.autoSaveDesc")}</span
                   >
                 </div>
+                {#if settings.autoSave}
+                  <div class="mt-3">
+                    <label class="block text-xs mb-1" style="color: var(--text-muted);">Delay (ms)</label>
+                    <div class="flex items-center gap-3">
+                      <input
+                        type="range"
+                        min="300"
+                        max="5000"
+                        step="100"
+                        bind:value={settings.autoSaveDelay}
+                        oninput={saveSettings}
+                        class="flex-1"
+                      />
+                      <span class="text-xs w-12 text-right" style="color: var(--text-secondary);">{settings.autoSaveDelay}ms</span>
+                    </div>
+                  </div>
+                {/if}
+                <div class="mt-3">
+                  <div class="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      bind:checked={settings.formatOnSave}
+                      class="rounded"
+                      onchange={saveSettings}
+                    />
+                    <span class="text-sm" style="color: var(--text-secondary);">Format on Save</span>
+                  </div>
+                  <span class="text-xs mt-1 block" style="color: var(--text-muted);">Auto-format files when saving (gofmt for Go, prettier for JS/TS/CSS)</span>
+                </div>
               </div>
             </div>
           {:else if activeTab === "appearance"}
@@ -355,7 +405,7 @@
                     <button
                       class="p-2 rounded text-xs transition-all text-left leading-tight"
                       style="background-color: {theme.colors.bg}; color: {theme.colors.text}; border: 2px solid {$currentTheme === theme.id ? theme.colors.accent : theme.colors.border}; min-height: 52px;"
-                      onclick={() => setTheme(theme.id)}
+                      onclick={() => { settings.theme = theme.id; setTheme(theme.id); saveSettings(); }}
                     >
                       <div class="flex gap-1 mb-0.5">
                         <span
@@ -401,7 +451,7 @@
                       lang.id
                         ? 'var(--accent)'
                         : 'var(--border)'};"
-                      onclick={() => setLang(lang.id)}
+                      onclick={() => { setLang(lang.id); saveSettings(); }}
                     >
                       {$t(lang.key)}
                     </button>
@@ -818,7 +868,7 @@
               <div class="flex gap-2">
                 <button
                   class="px-4 py-2 rounded text-sm font-medium"
-                  style="background-color: var(--accent); color: #fff;"
+                  style="background-color: var(--accent); color: var(--text-on-accent);"
                   onclick={() => (showCreateSkillDialog = true)}
                   >+ 创建新技能</button
                 >
@@ -938,7 +988,7 @@
               >
                 <div
                   class="rounded-lg shadow-xl p-6 overflow-y-auto"
-                  style="width: 520px; max-height: 85vh; background-color: var(--bg-primary); border: 1px solid var(--border);"
+                  style="width: min(520px, 90vw); max-height: 85vh; background-color: var(--bg-primary); border: 1px solid var(--border);"
                 >
                   <h3
                     class="text-sm font-medium mb-4"
@@ -1022,7 +1072,7 @@
                     >
                     <button
                       class="px-4 py-1.5 rounded text-sm font-medium"
-                      style="background-color: var(--accent); color: #fff;"
+                      style="background-color: var(--accent); color: var(--text-on-accent);"
                       onclick={createSkill}>创建</button
                     >
                   </div>
@@ -1046,7 +1096,7 @@
               >
                 <div
                   class="rounded-lg shadow-xl p-6"
-                  style="width: 440px; background-color: var(--bg-primary); border: 1px solid var(--border);"
+                  style="width: min(440px, 90vw); background-color: var(--bg-primary); border: 1px solid var(--border);"
                 >
                   <h3
                     class="text-sm font-medium mb-2"
@@ -1069,7 +1119,7 @@
                       style="background-color: {importSkillOk
                         ? '#2ea04315'
                         : '#e8112315'}; color: {importSkillOk
-                        ? '#2ea043'
+                        ? 'var(--success)'
                         : '#e81123'}; border: 1px solid {importSkillOk
                         ? '#2ea04333'
                         : '#e8112333'};"
@@ -1151,8 +1201,8 @@
               <div class="flex justify-center">
                 <button
                   class="px-6 py-2.5 rounded-lg text-sm font-medium transition-colors"
-                  style="background-color: var(--accent); color: #ffffff;"
-                  onclick={checkUpdate}
+style="background-color: var(--accent); color: var(--text-on-accent);"
+                   onclick={checkUpdate}
                   disabled={aboutChecking}
                 >
                   {#if aboutChecking}
@@ -1181,7 +1231,7 @@
           </button>
           <button
             class="px-4 py-2 rounded text-sm transition-colors"
-            style="background-color: var(--accent); color: #ffffff;"
+            style="background-color: var(--accent); color: var(--text-on-accent);"
             onclick={() => {
               saveSettings();
               settingsVisible.set(false);

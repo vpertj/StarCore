@@ -74,8 +74,7 @@
     installing = { ...installing }
     try {
       if (pkg.installCmd) {
-        const output = await window.backend.InstallLanguagePackage(pkg.id)
-        console.log('Install output:', output)
+        await window.backend.InstallLanguagePackage(pkg.id)
       }
       installedChecks[pkg.id] = true
       installedChecks = { ...installedChecks }

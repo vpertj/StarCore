@@ -19,14 +19,15 @@ type EmitFunc func(event string, data interface{})
 
 // Session represents an active terminal session.
 type Session struct {
-	ID        string
-	Pty       *conpty.ConPty
-	Done      chan struct{}
-	Created   time.Time
-	connected bool
-	mu        sync.Mutex
-	CWD       string
-	buffer    []string
+	ID          string
+	Pty         *conpty.ConPty
+	Done        chan struct{}
+	Created     time.Time
+	connected   bool
+	mu          sync.Mutex
+	CWD         string
+	ProjectPath string
+	buffer      []string
 }
 
 // Manager manages terminal sessions and their PTY processes.
@@ -48,7 +49,7 @@ func NewManager(emitFn EmitFunc, ctxDone <-chan struct{}) *Manager {
 }
 
 // New creates a new terminal session.
-func (m *Manager) New(cwd string) (string, error) {
+func (m *Manager) New(cwd string, projectPath string) (string, error) {
 	m.mu.Lock()
 	m.idx++
 	id := fmt.Sprintf("term_%d", m.idx)
@@ -82,11 +83,12 @@ func (m *Manager) New(cwd string) (string, error) {
 	}
 
 	session := &Session{
-		ID:      id,
-		Pty:     cpty,
-		Done:    make(chan struct{}),
-		Created: time.Now(),
-		CWD:     cwd,
+		ID:          id,
+		Pty:         cpty,
+		Done:        make(chan struct{}),
+		Created:     time.Now(),
+		CWD:         cwd,
+		ProjectPath: projectPath,
 	}
 
 	m.mu.Lock()
@@ -255,4 +257,37 @@ func (m *Manager) List() []map[string]interface{} {
 		})
 	}
 	return result
+}
+
+// ListByProject returns active terminal sessions for a specific project.
+func (m *Manager) ListByProject(projectPath string) []map[string]interface{} {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	result := make([]map[string]interface{}, 0)
+	for _, sess := range m.sessions {
+		if sess.ProjectPath == projectPath {
+			result = append(result, map[string]interface{}{
+				"id":      sess.ID,
+				"created": sess.Created.Format(time.RFC3339),
+			})
+		}
+	}
+	return result
+}
+
+// KillByProject closes and removes all terminal sessions for a specific project.
+func (m *Manager) KillByProject(projectPath string) {
+	m.mu.Lock()
+	toKill := make([]string, 0)
+	for id, sess := range m.sessions {
+		if sess.ProjectPath == projectPath {
+			toKill = append(toKill, id)
+		}
+	}
+	m.mu.Unlock()
+
+	for _, id := range toKill {
+		_ = m.Kill(id)
+	}
 }

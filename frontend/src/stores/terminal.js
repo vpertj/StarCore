@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store'
+import { writable, derived, get } from 'svelte/store'
 import { addLog } from './output.js'
 import { currentProject } from './app.js'
 
@@ -7,14 +7,23 @@ import { currentProject } from './app.js'
  */
 
 /**
- * @typedef {{ id: string, title: string, status: TerminalStatus, exitCode: number|null }} TerminalTab
+ * @typedef {{ id: string, title: string, status: TerminalStatus, exitCode: number|null, projectPath: string|null }} TerminalTab
  */
 
 export const terminalTabs = writable(/** @type {TerminalTab[]} */ ([]))
 export const activeTerminalId = writable(/** @type {string|null} */ (null))
 
+export const filteredTerminalTabs = derived(
+  [terminalTabs, currentProject],
+  ([$terminalTabs, $currentProject]) => {
+    if (!$currentProject) return $terminalTabs
+    return $terminalTabs.filter(t => t.projectPath === $currentProject || t.projectPath === null)
+  }
+)
+
 export async function createTerminalTab() {
   const cwd = get(currentProject) || ''
+  const projectPath = get(currentProject) || null
   let id
   try {
     id = await window.backend.NewTerminal(cwd)
@@ -22,7 +31,7 @@ export async function createTerminalTab() {
     addLog('IDE', 'error', 'Failed to create terminal: ' + (err.message || String(err)))
     return null
   }
-  const tab = { id, title: `Terminal ${terminalCounter++}`, status: 'running', exitCode: null }
+  const tab = { id, title: `Terminal ${terminalCounter++}`, status: 'running', exitCode: null, projectPath }
   terminalTabs.update(tabs => [...tabs, tab])
   activeTerminalId.set(id)
   return id
@@ -79,13 +88,9 @@ export async function restartTerminal(id) {
   window.dispatchEvent(new CustomEvent('terminal:restarted:' + id, { detail: { newId } }))
 }
 
-/**
- * @template T
- * @param {import('svelte/store').Readable<T>} store
- * @returns {T}
- */
-function get(store) {
-  /** @type {any} */ let value = undefined
-  store.subscribe(v => value = v)()
-  return value
+export function renameTerminal(id, newTitle) {
+  terminalTabs.update(tabs =>
+    tabs.map(t => t.id === id ? { ...t, title: newTitle } : t)
+  )
 }
+

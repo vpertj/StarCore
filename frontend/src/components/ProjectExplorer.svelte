@@ -1,8 +1,8 @@
 <script>
   import { fade } from 'svelte/transition'
   import { currentProject, fileTree, openFile, createNewFile, createNewFolder, deleteFileOrFolder, renameFileOrFolder, openProjectFolder, recentProjects, openProjectPath, removeRecentProject } from '../stores/app.js'
+  import { workspaceRoots, addWorkspaceRoot, removeWorkspaceRoot, setActiveWorkspaceRoot } from '../stores/workspace.js'
   import { t } from '../stores/i18n.js'
-  import { addLog } from '../stores/output.js'
   import TreeNode from './TreeNode.svelte'
 
   /** @typedef {{ name: string, path: string, isDir: boolean, children: any[], loaded?: boolean }} FileItem */
@@ -17,25 +17,7 @@
   let newFileName = $state('')
   let newFolderMode = $state(false)
   let newFolderName = $state('')
-  let analyzing = $state(false)
-  let analysisResult = $state('')
   let showRecentDropdown = $state(false)
-
-  async function analyzeProject() {
-    if (!window.backend?.AnalyzeProject || !$currentProject) return
-    analyzing = true
-    addLog('IDE', 'info', 'Analyzing project structure...')
-    try {
-      const result = await window.backend.AnalyzeProject($currentProject)
-      analysisResult = result
-      addLog('IDE', 'info', 'Project analysis complete')
-      window.dispatchEvent(new CustomEvent('insert-code', { detail: { code: result } }))
-    } catch (/** @type {any} */ err) {
-      addLog('IDE', 'error', 'Analysis failed: ' + (err.message || String(err)))
-    } finally {
-      analyzing = false
-    }
-  }
 
   function triggerUpdate() {
      expandedDirs = new Set(expandedDirs)
@@ -125,6 +107,22 @@
   function closeRecentDropdown() {
     showRecentDropdown = false
   }
+
+  async function addFolderToWorkspace() {
+    const folder = await openProjectFolder()
+    if (folder) {
+      await addWorkspaceRoot(folder)
+    }
+  }
+
+  async function removeRootFromWorkspace(path) {
+    await removeWorkspaceRoot(path)
+  }
+
+  async function switchActiveRoot(path) {
+    await setActiveWorkspaceRoot(path)
+    openProjectPath(path)
+  }
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
@@ -135,7 +133,7 @@
         <p class="text-sm mb-4" style="color: var(--text-secondary);">{$t('noProject')}</p>
         <button
           class="px-4 py-2 rounded transition-colors text-sm"
-          style="background-color: var(--accent); color: #ffffff;"
+          style="background-color: var(--accent); color: var(--text-on-accent);"
           onclick={openProject}
         >
           {$t('openFolder')}
@@ -170,72 +168,120 @@
       </div>
     {:else}
       <div class="text-sm">
-        <div class="flex items-center gap-1 px-2 py-1 group" style="color: var(--text-secondary);">
-          <span class="truncate-text flex-1" title={$currentProject}>{$currentProject.split(/[\\/]/).pop() || $currentProject}</span>
-          <button
-            class="px-1.5 py-0.5 rounded text-xs transition-colors shrink-0"
-            style="color: var(--accent);"
-            onmouseenter={(e) => e.currentTarget.style.backgroundColor = 'var(--selection)'}
-            onmouseleave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-            onclick={openProject}
-            title={$t('openFolder')}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-            </svg>
-          </button>
-          {#if $recentProjects.length > 0}
-            <div class="relative">
-              <button
-                class="px-1.5 py-0.5 rounded text-xs transition-colors shrink-0"
-                style="color: var(--text-muted);"
-                onmouseenter={(e) => e.currentTarget.style.backgroundColor = 'var(--selection)'}
-                onmouseleave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                onclick={(e) => { e.stopPropagation(); toggleRecentDropdown() }}
-                title={$t('recentProjects')}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        {#if $workspaceRoots.length > 1}
+          <div class="flex items-center gap-1 px-2 py-1" style="color: var(--text-secondary);">
+            <span class="truncate-text flex-1 text-xs font-medium uppercase" style="letter-spacing: 0.5px;">{$t('workspace.title')}</span>
+            <button
+              class="px-1.5 py-0.5 rounded text-xs transition-colors shrink-0"
+              style="color: var(--accent);"
+              onmouseenter={(e) => e.currentTarget.style.backgroundColor = 'var(--selection)'}
+              onmouseleave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+              onclick={addFolderToWorkspace}
+              title={$t('workspace.addRoot')}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+            </button>
+          </div>
+          {#each $workspaceRoots as root (root.path)}
+            <div class="root-section" class:root-active={root.active}>
+              <div class="flex items-center gap-1 px-2 py-1 cursor-pointer" style="color: {root.active ? 'var(--text-primary)' : 'var(--text-secondary)'};" onclick={() => switchActiveRoot(root.path)}>
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                 </svg>
-              </button>
-              {#if showRecentDropdown}
-                <!-- svelte-ignore a11y_no_static_element_interactions -->
-                <div
-                  class="absolute right-0 top-full mt-1 z-50 rounded shadow-lg py-1 max-h-64 overflow-y-auto"
-                  style="background-color: var(--bg-primary); border: 1px solid var(--border); min-width: 180px; max-width: calc(var(--sidebar-width, 250px) - 16px);"
-                  onclick={(e) => e.stopPropagation()}
-                >
-                  <div class="px-3 py-1 text-xs font-medium" style="color: var(--text-secondary);">{$t('recentProjects')}</div>
-                  {#each $recentProjects as path}
-                    <button
-                      class="w-full text-left px-3 py-1.5 text-xs truncate transition-colors"
-                      style="color: {path === $currentProject ? 'var(--accent)' : 'var(--text-primary)'}; background-color: {path === $currentProject ? 'var(--selection)' : 'transparent'};"
-                      onmouseenter={(e) => { if (path !== $currentProject) e.currentTarget.style.backgroundColor = 'var(--selection)' }}
-                      onmouseleave={(e) => { if (path !== $currentProject) e.currentTarget.style.backgroundColor = 'transparent' }}
-                      title={path}
-                      onclick={() => { openProjectPath(path); closeRecentDropdown() }}
-                    >
-                      {path.split(/[\\/]/).pop() || path}
-                    </button>
-                  {/each}
-                </div>
+                <span class="truncate-text flex-1" title={root.path}>{root.name}</span>
+                {#if !root.active}
+                  <button
+                    class="px-1 rounded text-xs transition-colors shrink-0 opacity-0 hover:opacity-100"
+                    style="color: var(--text-muted);"
+                    onclick={(e) => { e.stopPropagation(); removeRootFromWorkspace(root.path) }}
+                    title={$t('workspace.removeRoot')}
+                  >&times;</button>
+                {/if}
+              </div>
+              {#if root.active}
+                {#each $fileTree as file (file.path)}
+                  <TreeNode
+                    item={file}
+                    depth={1}
+                    expandedDirs={expandedDirs}
+                    onToggle={triggerUpdate}
+                    onFileClick={openFile}
+                    onContextMenu={showContextMenu}
+                  />
+                {/each}
               {/if}
             </div>
-          {/if}
-        </div>
-        <div class="px-2 pb-1 text-xs truncate-text" style="color: var(--text-muted);" title={$currentProject}>
-          {$currentProject}
-        </div>
-        {#each $fileTree as file (file.path)}
-          <TreeNode
-            item={file}
-            depth={0}
-            expandedDirs={expandedDirs}
-            onToggle={triggerUpdate}
-            onFileClick={openFile}
-            onContextMenu={showContextMenu}
-          />
-        {/each}
+          {/each}
+        {:else}
+          <div class="flex items-center gap-1 px-2 py-1 group" style="color: var(--text-secondary);">
+            <span class="truncate-text flex-1" title={$currentProject}>{$currentProject.split(/[\\/]/).pop() || $currentProject}</span>
+            <button
+              class="px-1.5 py-0.5 rounded text-xs transition-colors shrink-0"
+              style="color: var(--accent);"
+              onmouseenter={(e) => e.currentTarget.style.backgroundColor = 'var(--selection)'}
+              onmouseleave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+              onclick={openProject}
+              title={$t('openFolder')}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+              </svg>
+            </button>
+            {#if $recentProjects.length > 0}
+              <div class="relative">
+                <button
+                  class="px-1.5 py-0.5 rounded text-xs transition-colors shrink-0"
+                  style="color: var(--text-muted);"
+                  onmouseenter={(e) => e.currentTarget.style.backgroundColor = 'var(--selection)'}
+                  onmouseleave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                  onclick={(e) => { e.stopPropagation(); toggleRecentDropdown() }}
+                  title={$t('recentProjects')}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </button>
+                {#if showRecentDropdown}
+                  <!-- svelte-ignore a11y_no_static_element_interactions -->
+                  <div
+                    class="absolute right-0 top-full mt-1 z-50 rounded shadow-lg py-1 max-h-64 overflow-y-auto"
+                    style="background-color: var(--bg-primary); border: 1px solid var(--border); min-width: 180px; max-width: calc(var(--sidebar-width, 250px) - 16px);"
+                    onclick={(e) => e.stopPropagation()}
+                  >
+                    <div class="px-3 py-1 text-xs font-medium" style="color: var(--text-secondary);">{$t('recentProjects')}</div>
+                    {#each $recentProjects as path}
+                      <button
+                        class="w-full text-left px-3 py-1.5 text-xs truncate transition-colors"
+                        style="color: {path === $currentProject ? 'var(--accent)' : 'var(--text-primary)'}; background-color: {path === $currentProject ? 'var(--selection)' : 'transparent'};"
+                        onmouseenter={(e) => { if (path !== $currentProject) e.currentTarget.style.backgroundColor = 'var(--selection)' }}
+                        onmouseleave={(e) => { if (path !== $currentProject) e.currentTarget.style.backgroundColor = 'transparent' }}
+                        title={path}
+                        onclick={() => { openProjectPath(path); closeRecentDropdown() }}
+                      >
+                        {path.split(/[\\/]/).pop() || path}
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+            {/if}
+          </div>
+          <div class="px-2 pb-1 text-xs truncate-text" style="color: var(--text-muted);" title={$currentProject}>
+            {$currentProject}
+          </div>
+          {#each $fileTree as file (file.path)}
+            <TreeNode
+              item={file}
+              depth={0}
+              expandedDirs={expandedDirs}
+              onToggle={triggerUpdate}
+              onFileClick={openFile}
+              onContextMenu={showContextMenu}
+            />
+          {/each}
+        {/if}
       </div>
     {/if}
   </div>
@@ -309,5 +355,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.root-section {
+  border-left: 2px solid transparent;
+}
+.root-section.root-active {
+  border-left-color: var(--accent);
 }
 </style>

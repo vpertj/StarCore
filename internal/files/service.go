@@ -2,7 +2,6 @@ package files
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -58,24 +57,28 @@ func NewService() *Service {
 
 // ListDir lists files and directories in the given path.
 func (s *Service) ListDir(path string) ([]FileInfo, error) {
-	files, err := ioutil.ReadDir(path)
+	entries, err := os.ReadDir(path)
 	if err != nil {
 		return nil, err
 	}
-	result := make([]FileInfo, 0, len(files))
-	for _, file := range files {
-		if file.IsDir() && watcher.DefaultIgnoreDirs[file.Name()] {
+	result := make([]FileInfo, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() && watcher.DefaultIgnoreDirs[entry.Name()] {
 			continue
 		}
-		if !file.IsDir() && strings.HasPrefix(file.Name(), ".") && file.Name() != ".gitignore" && file.Name() != ".env" {
+		if !entry.IsDir() && strings.HasPrefix(entry.Name(), ".") && entry.Name() != ".gitignore" && entry.Name() != ".env" {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
 			continue
 		}
 		result = append(result, FileInfo{
-			Name:  file.Name(),
-			Path:  filepath.Join(path, file.Name()),
-			IsDir: file.IsDir(),
-			Size:  file.Size(),
-			Mode:  uint32(file.Mode()),
+			Name:  entry.Name(),
+			Path:  filepath.Join(path, entry.Name()),
+			IsDir: entry.IsDir(),
+			Size:  info.Size(),
+			Mode:  uint32(info.Mode()),
 		})
 	}
 	return result, nil
@@ -83,7 +86,7 @@ func (s *Service) ListDir(path string) ([]FileInfo, error) {
 
 // ReadFile reads a file and returns its content.
 func (s *Service) ReadFile(path string) (string, error) {
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
@@ -92,7 +95,7 @@ func (s *Service) ReadFile(path string) (string, error) {
 
 // WriteFile writes content to a file.
 func (s *Service) WriteFile(path string, content string) error {
-	return ioutil.WriteFile(path, []byte(content), 0644)
+	return os.WriteFile(path, []byte(content), 0644)
 }
 
 // CreateFile creates an empty file.
@@ -161,13 +164,13 @@ func (s *Service) ReplaceInFiles(query string, replacement string, options Searc
 				return nil
 			}
 		}
-		content, err := ioutil.ReadFile(path)
+		content, err := os.ReadFile(path)
 		if err != nil {
 			return nil
 		}
 		newContent := replaceInContent(string(content), query, replacement, options)
 		if newContent != string(content) {
-			return ioutil.WriteFile(path, []byte(newContent), info.Mode())
+			return os.WriteFile(path, []byte(newContent), info.Mode())
 		}
 		return nil
 	})
@@ -175,7 +178,7 @@ func (s *Service) ReplaceInFiles(query string, replacement string, options Searc
 
 // ApplyDiff applies a diff to a file.
 func (s *Service) ApplyDiff(filePath string, hunks []DiffHunk) error {
-	data, err := ioutil.ReadFile(filePath)
+	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
 	}
@@ -200,12 +203,12 @@ func (s *Service) ApplyDiff(filePath string, hunks []DiffHunk) error {
 	}
 
 	newContent := strings.Join(lines, "\n")
-	return ioutil.WriteFile(filePath, []byte(newContent), 0644)
+	return os.WriteFile(filePath, []byte(newContent), 0644)
 }
 
 // ComputeDiff computes a diff between disk content and new content.
 func (s *Service) ComputeDiff(filePath string, newContent string) ([]DiffHunk, error) {
-	data, err := ioutil.ReadFile(filePath)
+	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
@@ -390,7 +393,7 @@ func searchWithWalk(query string, options SearchOptions) ([]SearchResult, error)
 				return nil
 			}
 		}
-		content, err := ioutil.ReadFile(path)
+		content, err := os.ReadFile(path)
 		if err != nil {
 			return nil
 		}
@@ -407,4 +410,43 @@ func searchWithWalk(query string, options SearchOptions) ([]SearchResult, error)
 		return nil
 	})
 	return results, err
+}
+
+// FormatFile formats a file using the appropriate formatter for its language.
+func (s *Service) FormatFile(filePath string) (string, error) {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	switch ext {
+	case ".go":
+		return s.formatGo(filePath)
+	case ".js", ".jsx", ".ts", ".tsx", ".json", ".css", ".html", ".md":
+		return s.formatJS(filePath)
+	default:
+		return "", fmt.Errorf("no formatter available for %s", ext)
+	}
+}
+
+func (s *Service) formatGo(filePath string) (string, error) {
+	cmd := exec.Command("gofmt", "-w", filePath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("gofmt failed: %s: %w", string(output), err)
+	}
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", err
+	}
+	return string(content), nil
+}
+
+func (s *Service) formatJS(filePath string) (string, error) {
+	cmd := exec.Command("npx", "prettier", "--write", filePath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("prettier failed: %s: %w", string(output), err)
+	}
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", err
+	}
+	return string(content), nil
 }

@@ -29,7 +29,7 @@ async function handleClear() {
         <button
           class="px-2 py-0.5 rounded text-xs transition-colors"
           style="background-color: {selectedPeriod === period ? 'var(--selection, #094771)' : 'var(--bg-tertiary, var(--border))'}; color: {selectedPeriod === period ? '#ffffff' : 'var(--text-secondary, var(--text-secondary))'};"
-          on:click={() => changePeriod(period)}
+          onclick={() => changePeriod(period)}
         >
           {period === 'today' ? '今天' : period === 'week' ? '本周' : period === 'month' ? '本月' : '全部'}
         </button>
@@ -73,7 +73,7 @@ async function handleClear() {
     <button
       class="w-full px-4 py-2 rounded text-xs transition-colors"
       style="background-color: var(--bg-tertiary, var(--border)); color: var(--text-secondary, var(--text-secondary));"
-      on:click={handleClear}
+      onclick={handleClear}
       disabled={clearing}
     >
       {clearing ? '清空中...' : '重置用量数据'}

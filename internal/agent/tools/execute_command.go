@@ -12,9 +12,12 @@ import (
 	"unicode/utf8"
 
 	"StarCore/internal/agent"
+	"StarCore/internal/sandbox"
 )
 
 const maxCommandOutput = 8000
+
+var SandboxConfig *sandbox.Config
 
 type ExecuteCommandTool struct{}
 
@@ -52,6 +55,12 @@ func (t *ExecuteCommandTool) Execute(ctx context.Context, args map[string]any) (
 	cwd, _ := args["cwd"].(string)
 	if cwd == "" {
 		cwd = "."
+	}
+
+	if SandboxConfig != nil {
+		if err := SandboxConfig.ValidateCommand(command, cwd); err != nil {
+			return "", fmt.Errorf("sandbox: %w", err)
+		}
 	}
 
 	timeoutSec := 30

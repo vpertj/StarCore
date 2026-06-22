@@ -25,6 +25,7 @@ type Message struct {
 	TokensIn       int    `json:"tokensIn"`
 	TokensOut      int    `json:"tokensOut"`
 	CreatedAt      string `json:"createdAt"`
+	Metadata       string `json:"metadata,omitempty"`
 }
 
 func (s *Store) SaveConversation(conv *Conversation) error {
@@ -123,16 +124,16 @@ func (s *Store) SaveMessage(msg *Message) error {
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.Exec(`INSERT INTO messages
-		(id, conversation_id, seq, role, content, thinking, tokens_in, tokens_out, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	_, err = tx.Exec(`INSERT OR REPLACE INTO messages
+		(id, conversation_id, seq, role, content, thinking, tokens_in, tokens_out, created_at, metadata)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		msg.ID, msg.ConversationID, msg.Seq, msg.Role, msg.Content,
-		msg.Thinking, msg.TokensIn, msg.TokensOut, msg.CreatedAt)
+		msg.Thinking, msg.TokensIn, msg.TokensOut, msg.CreatedAt, msg.Metadata)
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(`UPDATE conversations SET message_count = message_count + 1, updated_at = ? WHERE id = ?`,
-		now(), msg.ConversationID)
+	_, err = tx.Exec(`UPDATE conversations SET message_count = (SELECT COUNT(*) FROM messages WHERE conversation_id = ?), updated_at = ? WHERE id = ?`,
+		msg.ConversationID, now(), msg.ConversationID)
 	if err != nil {
 		return err
 	}
@@ -142,7 +143,7 @@ func (s *Store) SaveMessage(msg *Message) error {
 func (s *Store) GetMessages(conversationID string) ([]Message, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	rows, err := s.db.Query(`SELECT id, conversation_id, seq, role, content, thinking, tokens_in, tokens_out, created_at
+	rows, err := s.db.Query(`SELECT id, conversation_id, seq, role, content, thinking, tokens_in, tokens_out, created_at, COALESCE(metadata, '')
 		FROM messages WHERE conversation_id = ? ORDER BY seq ASC`, conversationID)
 	if err != nil {
 		return nil, err
@@ -152,7 +153,7 @@ func (s *Store) GetMessages(conversationID string) ([]Message, error) {
 	for rows.Next() {
 		var m Message
 		if err := rows.Scan(&m.ID, &m.ConversationID, &m.Seq, &m.Role, &m.Content,
-			&m.Thinking, &m.TokensIn, &m.TokensOut, &m.CreatedAt); err != nil {
+			&m.Thinking, &m.TokensIn, &m.TokensOut, &m.CreatedAt, &m.Metadata); err != nil {
 			return nil, err
 		}
 		result = append(result, m)

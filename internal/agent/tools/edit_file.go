@@ -3,7 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"strings"
 
 	"StarCore/internal/agent"
@@ -49,7 +49,13 @@ func (t *EditFileTool) Execute(ctx context.Context, args map[string]any) (string
 		return "", fmt.Errorf("old_string or new_string is required")
 	}
 
-	data, err := ioutil.ReadFile(path)
+	if SandboxConfig != nil {
+		if err := SandboxConfig.ValidatePath(path); err != nil {
+			return "", fmt.Errorf("path validation failed: %w", err)
+		}
+	}
+
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("failed to read %s: %w", path, err)
 	}
@@ -78,7 +84,7 @@ func (t *EditFileTool) Execute(ctx context.Context, args map[string]any) (string
 	}
 
 	newContent := strings.Replace(content, oldStr, newStr, 1)
-	if err := ioutil.WriteFile(path, []byte(newContent), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(newContent), 0644); err != nil {
 		return "", fmt.Errorf("failed to write %s: %w", path, err)
 	}
 

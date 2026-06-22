@@ -5,8 +5,9 @@
   import AIPanelHeader from './AIPanelHeader.svelte'
   import ContextPreview from './ContextPreview.svelte'
   import DiffViewer from './DiffViewer.svelte'
-  import { pendingDiff, diffVisible, applyDiff, dismissDiff, showDiffForFile } from '../stores/diffPreview.js'
-   import { messages, isGenerating, sendMessage, addMessage, clearMessages, thinkingContent, contextFiles, contextCode, stopGenerating, toolCalls, approveToolCall, rejectToolCall, selectedCode, activeFileContent, detectTaskType, classifyError, retryLastMessage, pendingAsk, persistMessages, loopExhausted, continueLoop } from '../stores/ai.js'
+  import MultiFileDiffViewer from './MultiFileDiffViewer.svelte'
+  import { pendingDiff, diffVisible, applyDiff, dismissDiff, showDiffForFile, multiDiffVisible } from '../stores/diffPreview.js'
+    import { messages, isGenerating, sendMessage, addMessage, clearMessages, thinkingContent, contextFiles, stopGenerating, toolCalls, approveToolCall, rejectToolCall, selectedCode, activeFileContent, detectTaskType, classifyError, retryLastMessage, pendingAsk, persistMessages, loopExhausted, continueLoop } from '../stores/ai.js'
    import { get } from 'svelte/store'
   import { skills, executeSkill, isSkillExecuting, skillResult, executingSkillId, clearSkillResult, loadSkills } from '../stores/skill.js'
   import { activeProviderId, activeModelId, allAvailableModels, builtinProviders, loadModels } from '../stores/provider.js'
@@ -14,6 +15,7 @@
    import { activeConversationId } from '../stores/memory.js'
   import { aiMode } from '../stores/ai.js'
   import { Marked } from 'marked'
+  import { sanitizeMarkdownHtml } from '../lib/sanitize.js'
   import hljs from 'highlight.js'
  import { masterMode } from '../stores/masterMode.js'
 
@@ -21,27 +23,27 @@
 import { activeFileDiagnostics } from '../stores/diagnostics.js'
  import { t } from '../stores/i18n.js'
 
- let inputValue = ''
- /** @type {HTMLDivElement} */ let messagesContainer
- let isDragging = false
- let showSkillHint = false
- let showFilePicker = false
- let filePickerQuery = ''
+ let inputValue = $state('')
+ /** @type {HTMLDivElement} */ let messagesContainer = $state()
+ let isDragging = $state(false)
+ let showSkillHint = $state(false)
+ let showFilePicker = $state(false)
+ let filePickerQuery = $state('')
 
- let showAgentDropdown = false
- let showModelDropdown = false
- /** @type {Record<string, boolean>} */ let toolExpanded = {}
- let showModeDropdown = false
- let dropdownLeft = 0
- let dropdownBottom = 0
- let dropdownWidth = 300
- /** @type {HTMLElement|null} */ let inputAreaEl = null
- /** @type {HTMLTextAreaElement|null} */ let textareaEl = null
- let focusedSkillIndex = 0
- let focusedFileIndex = 0
- /** @type {{id: string, name: string, icon: string}|null} */ let currentSkill = null
- let showDone = false
- /** @type {ReturnType<typeof setTimeout>|null} */ let doneTimeout = null
+ let showAgentDropdown = $state(false)
+ let showModelDropdown = $state(false)
+ /** @type {Record<string, boolean>} */ let toolExpanded = $state({})
+ let showModeDropdown = $state(false)
+ let dropdownLeft = $state(0)
+ let dropdownBottom = $state(0)
+ let dropdownWidth = $state(300)
+ /** @type {HTMLElement|null} */ let inputAreaEl = $state(null)
+ /** @type {HTMLTextAreaElement|null} */ let textareaEl = $state(null)
+ let focusedSkillIndex = $state(0)
+ let focusedFileIndex = $state(0)
+ /** @type {{id: string, name: string, icon: string}|null} */ let currentSkill = $state(null)
+ let showDone = $state(false)
+ /** @type {ReturnType<typeof setTimeout>|null} */ let doneTimeout = $state(null)
 
  function updateDropdownPos() {
    const el = inputAreaEl || document.querySelector('.ai-panel-input')
@@ -57,29 +59,33 @@ import { activeFileDiagnostics } from '../stores/diagnostics.js'
    dropdownWidth = Math.max(240, r.width)
  }
 
- /** @type {Map<number, boolean>} */ let thinkingVisibleMap = new Map()
+ /** @type {Map<number, boolean>} */ let thinkingVisibleMap = $state(new Map())
 
- $: diagnostics = $activeFileDiagnostics?.map(d => d.message) || []
+ let diagnostics = $derived($activeFileDiagnostics?.map(d => d.message) || [])
 
  // Mode can be freely switched by user; auto-detect happens in sendMessage()
 
  // Update dropdown position whenever shown - delay for DOM render
- $: if (showSkillHint || showFilePicker) {
-   setTimeout(() => updateDropdownPos(), 30)
- }
- // Scroll focused dropdown item into view
- $: if (focusedSkillIndex >= 0 || focusedFileIndex >= 0) {
-   const items = document.querySelectorAll('.skill-dropdown-menu .dropdown-item, .file-dropdown-menu .dropdown-item')
-   const idx = showSkillHint ? focusedSkillIndex : focusedFileIndex
-   if (items[idx]) {
-     setTimeout(() => items[idx].scrollIntoView({ block: 'nearest' }), 40)
+ $effect(() => {
+   if (showSkillHint || showFilePicker) {
+     setTimeout(() => updateDropdownPos(), 30)
    }
- }
+ })
+ // Scroll focused dropdown item into view
+ $effect(() => {
+   if (focusedSkillIndex >= 0 || focusedFileIndex >= 0) {
+     const items = document.querySelectorAll('.skill-dropdown-menu .dropdown-item, .file-dropdown-menu .dropdown-item')
+     const idx = showSkillHint ? focusedSkillIndex : focusedFileIndex
+     if (items[idx]) {
+       setTimeout(() => items[idx].scrollIntoView({ block: 'nearest' }), 40)
+     }
+   }
+ })
 
- $: activeAgent = $agents.find(a => a.id === $activeAgentId) || $agents[0] || { name: 'AI', icon: '⚡' }
- $: activeModel = allModels.find(m => m.id === $activeModelId)
- $: displayProviderName = activeModel?.providerName || builtinProviders.find(p => p.id === activeModel?.providerId)?.name || activeModel?.providerId || ''
- $: allModels = $allAvailableModels.filter(m => m.enabled !== false)
+ let activeAgent = $derived($agents.find(a => a.id === $activeAgentId) || $agents[0] || { name: 'AI', icon: '⚡' })
+ let allModels = $derived($allAvailableModels.filter(m => m.enabled !== false))
+ let activeModel = $derived(allModels.find(m => m.id === $activeModelId))
+ let displayProviderName = $derived(activeModel?.providerName || builtinProviders.find(p => p.id === (activeModel?.groupId || activeModel?.providerId))?.name || activeModel?.groupId || activeModel?.providerId || '')
 
  /** @param {string} userInput */
 function buildSkillContext(userInput) {
@@ -96,8 +102,8 @@ function buildSkillContext(userInput) {
 
  /** @param {{id: string}} agent */
 function selectAgent(agent) { activeAgentId.set(agent.id); showAgentDropdown = false }
-/** @param {{id: string, providerId?: string}} model */
-function selectModel(model) { activeModelId.set(model.id); if (model.providerId && model.providerId !== $activeProviderId) { activeProviderId.set(model.providerId); loadModels() } showModelDropdown = false }
+/** @param {{id: string, providerId?: string, groupId?: string}} model */
+function selectModel(model) { activeModelId.set(model.id); const gid = model.groupId || model.providerId; if (gid && gid !== $activeProviderId) { activeProviderId.set(gid); loadModels() } showModelDropdown = false }
 /** @param {string} mode */
 function setMode(mode) { aiMode.set(mode); showModeDropdown = false }
 /** @param {MouseEvent} e */
@@ -344,7 +350,8 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
 
   function formatMessage(content) {
     try {
-      return marked.parse(content || '')
+      const raw = marked.parse(content || '')
+      return sanitizeMarkdownHtml(raw)
     } catch {
       return escapeHtml(content || '')
     }
@@ -363,7 +370,7 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
  }
 
  function removeContextCode() {
-   contextCode.set('')
+    // contextCode removed
  }
 
  /** @param {{name: string, path: string, isDir: boolean, children: any[]}[]} tree */
@@ -445,12 +452,14 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
    thinkingVisibleMap = thinkingVisibleMap
  }
 
- $: allFiles = flattenFileTree($fileTree)
- $: filteredFiles = filePickerQuery
-   ? allFiles.filter(f => f.toLowerCase().includes(filePickerQuery.toLowerCase()))
-   : allFiles
+ let allFiles = $derived(flattenFileTree($fileTree))
+ let filteredFiles = $derived(
+   filePickerQuery
+     ? allFiles.filter(f => f.toLowerCase().includes(filePickerQuery.toLowerCase()))
+     : allFiles
+ )
 
- $: {
+ $effect(() => {
    if (messagesContainer && ($messages.length > 0 || $skillResult)) {
      requestAnimationFrame(() => {
        requestAnimationFrame(() => {
@@ -460,9 +469,9 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
        })
      })
    }
- }
+ })
  // Also scroll when tool calls update
- $: {
+ $effect(() => {
    if (messagesContainer && $toolCalls.length > 0) {
      setTimeout(() => {
        const el = messagesContainer
@@ -470,35 +479,36 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
        el.scrollTop = el.scrollHeight
      }, 50)
    }
- }
+ })
 
  // Refocus textarea when generation ends (textarea is disabled during generation)
- $: if (!$isGenerating && !$isSkillExecuting && textareaEl) {
-   setTimeout(() => textareaEl?.focus(), 50)
- }
-
- // Show "done" indicator briefly after generation, hide on new activity
- $: if (!$isGenerating && !$isSkillExecuting && $messages.length > 0) {
-   if (!showDone) {
-     showDone = true
-     if (doneTimeout) clearTimeout(doneTimeout)
-     doneTimeout = setTimeout(() => showDone = false, 4000)
+ $effect(() => {
+   if (!$isGenerating && !$isSkillExecuting && textareaEl) {
+     setTimeout(() => textareaEl?.focus(), 50)
    }
- }
- $: if ($isGenerating || $isSkillExecuting) {
-   showDone = false
-   if (doneTimeout) clearTimeout(doneTimeout)
- }
- $: if (inputValue) {
-   showDone = false
-   if (doneTimeout) clearTimeout(doneTimeout)
- }
+ })
+
+ // Show "done" indicator briefly after generation ends
+  let prevGenerating = $state(false)
+  $effect(() => {
+    const generating = $isGenerating || $isSkillExecuting
+    if (prevGenerating && !generating && $messages.length > 0) {
+      showDone = true
+      if (doneTimeout) clearTimeout(doneTimeout)
+      doneTimeout = setTimeout(() => { showDone = false }, 4000)
+    }
+    if (generating) {
+      showDone = false
+      if (doneTimeout) clearTimeout(doneTimeout)
+    }
+    prevGenerating = generating
+  })
 </script>
 
 <svelte:window onclick={closeDropdowns} />
 
-{#if $aiPanelVisible}
-  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element_interactions -->
+<div class="ai-panel-container" class:hidden={!$aiPanelVisible}>
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions, a11y_no_noninteractive_element-interactions -->
   <div
     role="separator"
     aria-orientation="vertical"
@@ -512,7 +522,6 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
 
     <ContextPreview
       contextFiles={$contextFiles}
-      contextCode={$contextCode}
       {diagnostics}
       onremovefile={removeContextFile}
       onremovecode={removeContextCode}
@@ -606,16 +615,43 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
 
         {:else}
         {#each $messages as message, msgIdx}
+          {#if message.role === 'tool'}
+            {@const toolMeta = (() => { try { return JSON.parse(message.metadata || '{}') } catch { return {} } })()}
+            <div class="flex gap-3 pl-10" in:fade={{ duration: 150 }}>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-xs px-1.5 py-0.5 rounded" style="background-color: var(--bg-tertiary); color: var(--text-muted);">
+                    {#if toolMeta.name}
+                      <span class="font-mono">{toolMeta.name}</span>
+                      {#if toolMeta.args?.path}
+                        <span class="opacity-60">({toolMeta.args.path.split(/[\\/]/).pop()})</span>
+                      {/if}
+                    {:else}
+                      Tool
+                    {/if}
+                  </span>
+                  <span class="text-xs" style="color: {toolMeta.status === 'error' ? 'var(--error)' : 'var(--success)'};">
+                    {toolMeta.status === 'error' ? 'Failed' : 'Done'}
+                  </span>
+                </div>
+                {#if message.content}
+                  <div class="text-xs font-mono rounded p-2 mt-1" style="background-color: var(--bg-tertiary); color: var(--text-secondary); max-height: 100px; overflow-y: auto;">
+                    {message.content.slice(0, 500)}{message.content.length > 500 ? '...' : ''}
+                  </div>
+                {/if}
+              </div>
+            </div>
+          {:else}
           <div class="group relative flex gap-3" in:fade={{ duration: 150 }}>
             {#if message.role === 'user'}
               <div class="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style="background-color: var(--accent);">
-                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: #ffffff;">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: var(--text-on-accent);">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                 </svg>
               </div>
             {:else}
               <div class="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style="background-color: var(--ai-color);">
-                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: #ffffff;">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: var(--text-on-accent);">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
               </div>
@@ -686,12 +722,13 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
               </button>
             </div>
           </div>
+          {/if}
         {/each}
 
         {#if $isGenerating}
           <div class="flex gap-3" in:fade={{ duration: 200 }}>
             <div class="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style="background-color: var(--ai-color);">
-              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: #ffffff;">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: var(--text-on-accent);">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
             </div>
@@ -707,13 +744,19 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
           {@const diffFilePath = diff.filePath}
           <div class="mt-4" in:fade>
             <div class="flex items-center justify-between mb-2">
-              <span class="text-xs font-medium" style="color: #e06c75;">Diff Preview</span>
+              <span class="text-xs font-medium" style="color: var(--error);">Diff Preview</span>
               <div class="flex gap-1">
                 <button class="btn btn-success btn-sm" onclick={() => applyDiff(diffFilePath, diffHunks)}>Apply</button>
                 <button class="btn btn-ghost btn-sm" onclick={dismissDiff}>Dismiss</button>
               </div>
             </div>
             <DiffViewer hunks={diffHunks} filePath={diffFilePath} />
+          </div>
+        {/if}
+
+        {#if $multiDiffVisible}
+          <div class="panel-card mt-4" style="border-color: var(--selection);" in:fade={{ duration: 200 }}>
+            <MultiFileDiffViewer />
           </div>
         {/if}
 
@@ -763,7 +806,7 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
           {#if showAgentDropdown}
             <div class="absolute bottom-full left-0 mb-1 z-50 rounded shadow-lg overflow-y-auto" style="background-color: var(--bg-secondary); border: 1px solid var(--border); min-width: 180px; max-height: 260px;">
               {#each $agents as agent}
-                <button class="w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors text-left" style="background-color: {$activeAgentId === agent.id ? '#094771' : 'transparent'}; color: {$activeAgentId === agent.id ? '#ffffff' : 'var(--text-primary)'};" onclick={() => selectAgent(agent)}>
+                <button class="w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors text-left" style="background-color: {$activeAgentId === agent.id ? '#094771' : 'transparent'}; color: {$activeAgentId === agent.id ? 'var(--text-on-accent)' : 'var(--text-primary)'};" onclick={() => selectAgent(agent)}>
                   <span class="text-base">{agent.icon}</span>
                   <div class="flex-1 min-w-0"><div class="font-medium truncate">{agent.name}</div><div class="text-xs truncate" style="color: var(--text-muted);">{agent.description}</div></div>
                 </button>
@@ -782,12 +825,12 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
               {#if allModels.length === 0}
                 <div class="px-3 py-3 text-xs" style="color: var(--text-muted); text-align: center;">No models configured. Add a provider in Settings.</div>
               {:else}
-                {#each [...new Set(allModels.map(m => m.providerId))] as pid}
-                  {@const providerName = builtinProviders.find(p => p.id === pid)?.name || allModels.find(m => m.providerId === pid && m.providerName)?.providerName || pid}
-                  {@const providerModelList = allModels.filter(m => m.providerId === pid)}
+                {#each [...new Set(allModels.map(m => m.groupId || m.providerId))] as gid}
+                  {@const providerName = allModels.find(m => (m.groupId || m.providerId) === gid)?.providerName || builtinProviders.find(p => p.id === gid)?.name || gid}
+                  {@const providerModelList = allModels.filter(m => (m.groupId || m.providerId) === gid)}
                   <div class="px-3 py-1.5 text-xs font-semibold" style="color: var(--text-muted);">{providerName}</div>
                   {#each providerModelList as model}
-                    <button class="w-full flex items-center gap-2 px-3 py-1.5 text-sm transition-colors text-left" style="background-color: {$activeModelId === model.id ? '#094771' : 'transparent'}; color: {$activeModelId === model.id ? '#ffffff' : 'var(--text-primary)'};" onclick={() => selectModel(model)}>
+                    <button class="w-full flex items-center gap-2 px-3 py-1.5 text-sm transition-colors text-left" style="background-color: {$activeModelId === model.id ? '#094771' : 'transparent'}; color: {$activeModelId === model.id ? 'var(--text-on-accent)' : 'var(--text-primary)'};" onclick={() => selectModel(model)}>
                       <span class="truncate">{model.name}</span>
                       {#if model.supportsThinking}<span class="text-[10px] px-1 rounded" style="background-color: var(--border); color: var(--text-secondary);">thinking</span>{/if}
                     </button>
@@ -798,7 +841,7 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
           {/if}
         </div>
         <div class="relative">
-          <button class="dropdown-trigger flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors shrink-0" style="background-color: {$aiMode !== 'chat' ? '#094771' : 'var(--bg-secondary)'}; color: {$aiMode !== 'chat' ? '#ffffff' : 'var(--text-secondary)'}; border: 1px solid var(--border);" onclick={(e) => { e.stopPropagation(); showModeDropdown = !showModeDropdown; showAgentDropdown = false; showModelDropdown = false }}>
+          <button class="dropdown-trigger flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors shrink-0" style="background-color: {$aiMode !== 'chat' ? '#094771' : 'var(--bg-secondary)'}; color: {$aiMode !== 'chat' ? 'var(--text-on-accent)' : 'var(--text-secondary)'}; border: 1px solid var(--border);" onclick={(e) => { e.stopPropagation(); showModeDropdown = !showModeDropdown; showAgentDropdown = false; showModelDropdown = false }}>
             {#if $aiMode === 'plan'}<svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>{:else if $aiMode === 'build'}<svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>{:else}<svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>{/if}
             <span style="max-width: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{$masterMode ? ($aiMode === 'plan' ? 'Plan' : 'Build') : 'Chat'}</span>
             {#if $masterMode}
@@ -809,16 +852,16 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
           {#if showModeDropdown}
             <div class="absolute bottom-full right-0 mb-1 z-50 rounded shadow-lg overflow-y-auto" style="background-color: var(--bg-secondary); border: 1px solid var(--border); min-width: 150px;">
               {#if !$masterMode}
-              <button class="w-full flex items-center gap-3 px-3 py-2 text-sm transition-colors text-left" style="background-color: {$aiMode === 'chat' ? '#094771' : 'transparent'}; color: {$aiMode === 'chat' ? '#ffffff' : 'var(--text-primary)'};" onclick={() => setMode('chat')}>
+              <button class="w-full flex items-center gap-3 px-3 py-2 text-sm transition-colors text-left" style="background-color: {$aiMode === 'chat' ? '#094771' : 'transparent'}; color: {$aiMode === 'chat' ? 'var(--text-on-accent)' : 'var(--text-primary)'};" onclick={() => setMode('chat')}>
                 <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
                 <div><div class="font-medium">Chat</div><div class="text-xs" style="color: var(--text-muted);">对话编程</div></div>
               </button>
               {:else}
-              <button class="w-full flex items-center gap-3 px-3 py-2 text-sm transition-colors text-left" style="background-color: {$aiMode === 'plan' ? '#094771' : 'transparent'}; color: {$aiMode === 'plan' ? '#ffffff' : 'var(--text-primary)'};" onclick={() => setMode('plan')}>
+              <button class="w-full flex items-center gap-3 px-3 py-2 text-sm transition-colors text-left" style="background-color: {$aiMode === 'plan' ? '#094771' : 'transparent'}; color: {$aiMode === 'plan' ? 'var(--text-on-accent)' : 'var(--text-primary)'};" onclick={() => setMode('plan')}>
                 <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
                 <div><div class="font-medium">Plan</div><div class="text-xs" style="color: var(--text-muted);">分析规划</div></div>
               </button>
-              <button class="w-full flex items-center gap-3 px-3 py-2 text-sm transition-colors text-left" style="background-color: {$aiMode === 'build' ? '#094771' : 'transparent'}; color: {$aiMode === 'build' ? '#ffffff' : 'var(--text-primary)'};" onclick={() => setMode('build')}>
+              <button class="w-full flex items-center gap-3 px-3 py-2 text-sm transition-colors text-left" style="background-color: {$aiMode === 'build' ? '#094771' : 'transparent'}; color: {$aiMode === 'build' ? 'var(--text-on-accent)' : 'var(--text-primary)'};" onclick={() => setMode('build')}>
                 <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
                 <div><div class="font-medium">Build</div><div class="text-xs" style="color: var(--text-muted);">自动编程</div></div>
               </button>
@@ -830,8 +873,8 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
 
       {#if currentSkill}
         <div class="flex items-center gap-1 px-3 py-1">
-          <span style="color: #2ea043; font-size: 12px;">⚡ {currentSkill.icon} {currentSkill.name}</span>
-          <button class="text-xs px-1 rounded hover:bg-white/10" style="color: var(--text-muted);" onclick={() => currentSkill = null} title="Cancel skill">✕</button>
+          <span style="color: var(--success); font-size: 12px;">⚡ {currentSkill.icon} {currentSkill.name}</span>
+          <button class="text-xs px-1 rounded hover:bg-[var(--bg-hover)]" style="color: var(--text-muted);" onclick={() => currentSkill = null} title="Cancel skill">✕</button>
         </div>
       {/if}
 
@@ -851,7 +894,7 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
           <span class="loading-dots"><span>.</span><span>.</span><span>.</span></span>
         </div>
       {:else if showDone}
-        <div class="flex items-center gap-1 px-3 py-1 text-xs" style="color: #2ea043;" transition:fade={{ duration: 300 }}>
+        <div class="flex items-center gap-1 px-3 py-1 text-xs" style="color: var(--success);" transition:fade={{ duration: 300 }}>
           <span>✓</span>
           <span>已完成 — 可以继续输入</span>
         </div>
@@ -879,7 +922,7 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
                   {#each $pendingAsk.options as opt, i}
                     <button
                       class="px-3 py-1 rounded text-xs font-medium transition-colors"
-                      style="background-color: var(--accent); color: #ffffff;"
+                      style="background-color: var(--accent); color: var(--text-on-accent);"
                       onclick={async () => {
                         const req = $pendingAsk
                         pendingAsk.set(null)
@@ -901,7 +944,7 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
                 />
                 <button
                   class="px-3 py-1 rounded text-xs font-medium"
-                  style="background-color: var(--accent); color: #ffffff;"
+                  style="background-color: var(--accent); color: var(--text-on-accent);"
                   onclick={async () => {
                     const input = /** @type {HTMLInputElement} */ (document.getElementById('ask-user-input'))
                     const answer = input?.value?.trim()
@@ -930,12 +973,12 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
               <div class="flex flex-wrap gap-2">
                 <button
                   class="px-3 py-1 rounded text-xs font-medium transition-colors"
-                  style="background-color: var(--accent); color: #ffffff;"
+                  style="background-color: var(--accent); color: var(--text-on-accent);"
                   onclick={() => continueLoop(10)}
                 >继续 +10轮</button>
                 <button
                   class="px-3 py-1 rounded text-xs font-medium transition-colors"
-                  style="background-color: var(--accent); color: #ffffff;"
+                  style="background-color: var(--accent); color: var(--text-on-accent);"
                   onclick={() => continueLoop(20)}
                 >继续 +20轮</button>
                 <button
@@ -1040,11 +1083,25 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
       </div>
     </div>
   </div>
-{/if}
+</div>
 
 <style>
+.ai-panel-container {
+  display: flex;
+  flex-shrink: 0;
+  height: 100%;
+  transition: width 0.2s ease;
+  overflow: hidden;
+}
+.ai-panel-container.hidden {
+  width: 0 !important;
+  overflow: hidden;
+}
+.ai-panel-container.hidden .ai-resize-handle {
+  width: 0 !important;
+}
 .status-line {
-  color: #4ade80;
+  color: var(--success);
 }
 
 .status-spinner {
@@ -1152,7 +1209,7 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
 
 :global(.insert-btn) {
   background-color: var(--accent);
-  color: #ffffff;
+  color: var(--text-on-accent);
 }
 :global(.insert-btn:hover) {
   background-color: var(--accent-hover);

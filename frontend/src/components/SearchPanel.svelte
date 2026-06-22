@@ -5,15 +5,29 @@ import { t } from '../stores/i18n.js'
 
 /** @typedef {{ filePath: string, line: number, content: string }} SearchResult */
 
-let searchQuery = ''
-let replaceQuery = ''
-/** @type {SearchResult[]} */ let searchResults = []
-let isSearching = false
-let caseSensitive = false
-let wholeWord = false
-let useRegex = false
-let includePattern = ''
-let excludePattern = ''
+let searchQuery = $state('')
+let replaceQuery = $state('')
+/** @type {SearchResult[]} */ let searchResults = $state([])
+let isSearching = $state(false)
+let caseSensitive = $state(false)
+let wholeWord = $state(false)
+let useRegex = $state(false)
+let includePattern = $state('')
+let excludePattern = $state('')
+let expandedFiles = $state(new Set())
+let replaceConfirm = $state(false)
+
+/** @type {Record<string, SearchResult[]>} */
+let groupedResults = $derived.by(() => {
+  const groups = {}
+  for (const r of searchResults) {
+    if (!groups[r.filePath]) groups[r.filePath] = []
+    groups[r.filePath].push(r)
+  }
+  return groups
+})
+
+let totalFiles = $derived(Object.keys(groupedResults).length)
 
 async function performSearch() {
   if (!searchQuery.trim()) return
@@ -30,6 +44,7 @@ async function performSearch() {
       excludePattern,
     })
     searchResults = results
+    expandedFiles = new Set(results.length > 0 ? [results[0].filePath] : [])
   } catch (err) {
     console.error('Search failed:', err)
   } finally {
@@ -37,8 +52,21 @@ async function performSearch() {
   }
 }
 
+function toggleFile(filePath) {
+  if (expandedFiles.has(filePath)) {
+    expandedFiles.delete(filePath)
+  } else {
+    expandedFiles.add(filePath)
+  }
+  expandedFiles = new Set(expandedFiles)
+}
+
 async function performReplace() {
   if (!searchQuery.trim() || !replaceQuery.trim()) return
+  if (!replaceConfirm) {
+    replaceConfirm = true
+    return
+  }
   
   try {
     await window.backend.ReplaceInFiles(searchQuery, replaceQuery, {
@@ -48,17 +76,22 @@ async function performReplace() {
       includePattern,
       excludePattern,
     })
-    // 重新搜索以更新结果
+    replaceConfirm = false
     performSearch()
   } catch (err) {
     console.error('Replace failed:', err)
+    replaceConfirm = false
   }
+}
+
+function cancelReplace() {
+  replaceConfirm = false
 }
 
 /** @param {SearchResult} result */
 function handleResultClick(result) {
   openFile(result.filePath)
-  // TODO: 跳转到具体行号
+  window.dispatchEvent(new CustomEvent('search:goto-line', { detail: { line: result.line } }))
 }
 
 /** @param {KeyboardEvent} e */
@@ -76,7 +109,7 @@ function handleKeyDown(e) {
     <button 
       class="p-1 rounded transition-colors"
       style="color: var(--text-secondary);"
-      on:click={() => setActiveView('explorer')}
+      onclick={() => setActiveView('explorer')}
       aria-label="关闭搜索"
     >
       <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -92,15 +125,15 @@ function handleKeyDown(e) {
       <input 
         type="text" 
         bind:value={searchQuery}
-        placeholder="Search"
+        placeholder={$t('search.placeholder')}
         class="w-full px-3 py-2 rounded border text-sm"
         style="background-color: var(--bg-secondary); color: var(--text-primary); border-color: var(--border);"
-        on:keydown={handleKeyDown}
+        onkeydown={handleKeyDown}
       />
       <button 
         class="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 rounded"
         style="color: var(--text-secondary);"
-        on:click={performSearch}
+        onclick={performSearch}
         aria-label="搜索"
       >
         <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -114,17 +147,37 @@ function handleKeyDown(e) {
       <input 
         type="text" 
         bind:value={replaceQuery}
-        placeholder="Replace"
+        placeholder={$t('search.replacePlaceholder')}
         class="w-full px-3 py-2 rounded border text-sm"
         style="background-color: var(--bg-secondary); color: var(--text-primary); border-color: var(--border);"
       />
-      <button 
-        class="absolute right-2 top-1/2 transform -translate-y-1/2 px-2 py-1 rounded text-xs"
-        style="background-color: var(--accent); color: #ffffff;"
-        on:click={performReplace}
-      >
-        Replace All
-      </button>
+      <div class="absolute right-2 top-1/2 transform -translate-y-1/2 flex gap-1">
+        {#if replaceConfirm}
+          <button 
+            class="px-2 py-1 rounded text-xs"
+            style="background-color: var(--error); color: var(--text-on-accent);"
+            onclick={performReplace}
+          >
+            {$t('search.confirm')} ({searchResults.length})
+          </button>
+          <button 
+            class="px-2 py-1 rounded text-xs"
+            style="background-color: var(--bg-tertiary); color: var(--text-secondary);"
+            onclick={cancelReplace}
+          >
+            {$t('settings.cancel')}
+          </button>
+        {:else}
+          <button 
+            class="px-2 py-1 rounded text-xs"
+            style="background-color: var(--accent); color: var(--text-on-accent);"
+            onclick={performReplace}
+            disabled={!searchQuery.trim() || !replaceQuery.trim()}
+          >
+            {$t('search.replaceAll')}
+          </button>
+        {/if}
+      </div>
     </div>
     
     <!-- 搜索选项 -->
@@ -148,14 +201,14 @@ function handleKeyDown(e) {
       <input 
         type="text" 
         bind:value={includePattern}
-        placeholder="files to include"
+        placeholder={$t('search.includePlaceholder')}
         class="w-full px-3 py-1.5 rounded border text-xs"
         style="background-color: var(--bg-secondary); color: var(--text-primary); border-color: var(--border);"
       />
       <input 
         type="text" 
         bind:value={excludePattern}
-        placeholder="files to exclude"
+        placeholder={$t('search.excludePlaceholder')}
         class="w-full px-3 py-1.5 rounded border text-xs"
         style="background-color: var(--bg-secondary); color: var(--text-primary); border-color: var(--border);"
       />
@@ -170,40 +223,75 @@ function handleKeyDown(e) {
       </div>
     {:else if searchResults.length > 0}
       <div class="px-3 py-2 text-xs" style="color: var(--text-secondary);">
-        {searchResults.length} results
+        {$t('search.resultsCount').replace('{0}', searchResults.length).replace('{1}', totalFiles)}
       </div>
-      {#each searchResults as result}
-        <!-- svelte-ignore a11y-click-events-have-key-events -->
+      {#each Object.entries(groupedResults) as [filePath, results]}
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
         <div 
-          class="px-3 py-2 cursor-pointer transition-colors hover:bg-dark"
-          style="border-bottom: 1px solid var(--border);"
+          class="file-group-header"
+          onclick={() => toggleFile(filePath)}
           role="button"
           tabindex="0"
-          on:click={() => handleResultClick(result)}
+          onkeydown={(e) => { if (e.key === 'Enter') toggleFile(filePath) }}
         >
-          <div class="flex items-center gap-2 mb-1">
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: var(--text-secondary);">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            <span class="text-sm truncate-text" style="color: var(--text-primary);">{result.filePath}</span>
-          </div>
-          <div class="pl-6 text-xs" style="color: var(--text-secondary);">
-            Line {result.line}: {result.content}
-          </div>
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="transform: rotate({expandedFiles.has(filePath) ? 90 : 0}deg); transition: transform 0.15s;">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+          </svg>
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="color: var(--text-secondary);">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          <span class="text-sm truncate" style="color: var(--text-primary);">{filePath}</span>
+          <span class="text-xs ml-auto" style="color: var(--text-muted);">{results.length}</span>
         </div>
+        {#if expandedFiles.has(filePath)}
+          {#each results as result}
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
+            <div 
+              class="search-result-item"
+              role="button"
+              tabindex="0"
+              onclick={() => handleResultClick(result)}
+            >
+              <span class="text-xs shrink-0 w-8 text-right" style="color: var(--text-muted);">{result.line}</span>
+              <span class="text-xs flex-1 truncate" style="color: var(--text-secondary);">{result.content}</span>
+            </div>
+          {/each}
+        {/if}
       {/each}
     {:else if searchQuery}
       <div class="flex items-center justify-center py-8">
-        <span class="text-sm" style="color: var(--text-secondary);">No results found</span>
+        <span class="text-sm" style="color: var(--text-secondary);">{$t('search.noResults')}</span>
       </div>
     {/if}
   </div>
 </div>
 
 <style>
-.truncate-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.file-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-family: 'Consolas', monospace;
+  cursor: pointer;
+  transition: background-color 0.1s;
+  border-bottom: 1px solid var(--border);
+}
+.file-group-header:hover {
+  background-color: var(--bg-hover);
+}
+.search-result-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 12px 3px 28px;
+  font-size: 12px;
+  font-family: 'Consolas', monospace;
+  cursor: pointer;
+  transition: background-color 0.1s;
+}
+.search-result-item:hover {
+  background-color: var(--bg-hover);
 }
 </style>

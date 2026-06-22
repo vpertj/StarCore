@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -32,7 +31,7 @@ func NewServerManager(toolExec *agent.ToolExecutor, dataDir string) *ServerManag
 
 func (m *ServerManager) LoadConfig() error {
 	configPath := filepath.Join(m.dataDir, "mcp_servers.json")
-	data, err := ioutil.ReadFile(configPath)
+	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// First run: seed built-in MCP templates
@@ -126,7 +125,9 @@ func (m *ServerManager) seedBuiltinTemplates() {
 
 func (m *ServerManager) SaveConfig() error {
 	configPath := filepath.Join(m.dataDir, "mcp_servers.json")
-	os.MkdirAll(m.dataDir, 0755)
+	if err := os.MkdirAll(m.dataDir, 0755); err != nil {
+		return fmt.Errorf("create data dir: %w", err)
+	}
 
 	m.mu.RLock()
 	data, err := json.MarshalIndent(m.configs, "", "  ")
@@ -135,7 +136,7 @@ func (m *ServerManager) SaveConfig() error {
 		return err
 	}
 
-	return ioutil.WriteFile(configPath, data, 0644)
+	return os.WriteFile(configPath, data, 0644)
 }
 
 func (m *ServerManager) AddServer(config MCPServerConfig) error {

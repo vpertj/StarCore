@@ -1,9 +1,9 @@
-import { writable, derived } from 'svelte/store'
+import { writable, derived, get } from 'svelte/store'
 import { KEYS } from './constants.js'
 import { LoadCustomModels, SaveCustomModels } from '../../wailsjs/go/main/App.js'
 
 /** @typedef {{ id: string, name: string, endpoint?: string, enabled?: boolean, isDefault?: boolean }} Provider */
-/** @typedef {{ id: string, name: string, providerId: string, providerName?: string, supportsThinking?: boolean, enabled?: boolean, isCustom?: boolean, apiKey?: string, modelId?: string, endpoint?: string, maxTokens?: number, contextWindow?: number }} Model */
+/** @typedef {{ id: string, name: string, providerId: string, providerName?: string, groupId?: string, supportsThinking?: boolean, enabled?: boolean, isCustom?: boolean, apiKey?: string, modelId?: string, endpoint?: string, maxTokens?: number, contextWindow?: number }} Model */
 
 export const providers = writable(/** @type {Provider[]} */ ([]))
 
@@ -182,18 +182,6 @@ export async function setProviderConfig(providerId, config) {
     }
   }
 }
-
-/**
- * @template T
- * @param {import('svelte/store').Readable<T>} store
- * @returns {T}
- */
-function get(store) {
-  /** @type {any} */ let value = undefined
-  store.subscribe(/** @param {any} v */ v => value = v)()
-  return value
-}
-
 /**
  * Resolve a model ID (possibly a composite "provider:model" custom model ID)
  * and return the effective provider ID, model name, and credentials to configure.
@@ -208,7 +196,7 @@ export function resolveModelProvider(modelId, providerId, customModelsStore) {
   const customModel = $customModels.find(/** @param {any} m */ m => m.id === modelId)
 
   if (customModel) {
-    const resolvedProviderId = customModel.providerId || providerId
+    const resolvedProviderId = customModel.groupId || customModel.providerId || providerId
     const resolvedModel = customModel.modelId || modelId
     const apiKey = customModel.apiKey || ''
     let endpoint = customModel.endpoint || ''

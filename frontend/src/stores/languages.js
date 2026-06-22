@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store'
+import { writable, get } from 'svelte/store'
 
 const builtinLanguageMap = {
   '.go': 'go',
@@ -48,8 +48,3 @@ export function getLanguageIdFromPath(path) {
   return builtinLanguageMap[ext] || 'plaintext'
 }
 
-function get(store) {
-  let value = undefined
-  store.subscribe(v => value = v)()
-  return value
-}

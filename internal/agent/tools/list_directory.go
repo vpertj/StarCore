@@ -3,7 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -39,7 +39,7 @@ func (t *ListDirectoryTool) Execute(ctx context.Context, args map[string]any) (s
 		path = "."
 	}
 
-	files, err := ioutil.ReadDir(path)
+	files, err := os.ReadDir(path)
 	if err != nil {
 		return "", err
 	}
