@@ -54,6 +54,9 @@
   /** @type {(() => void)|null} */ let themeUnsub = null
   /** @type {(() => void)|null} */ let fileChangeUnsubscribe = null
   let lspDiagUnsubscribe = null
+  /** @type {(() => void)|null} */ let debugStateUnsub = null
+  /** @type {((e: Event) => void)|null} */ let onDomFileChanged = null
+  /** @type {((e: Event) => void)|null} */ let onAIFileModified = null
    let mounted = false
    let lastSettingsJSON = ''
   let contextMenuVisible = $state(false)
@@ -747,13 +750,13 @@
     })
 
     // Also listen for DOM CustomEvent from diffPreview / ProjectExplorer
-    const onDomFileChanged = (/** @type {CustomEvent} */ e) => {
+    onDomFileChanged = (/** @type {CustomEvent} */ e) => {
       onFileChanged(e.detail?.path || '')
     }
     window.addEventListener('file-changed', onDomFileChanged)
 
     // Listen for AI file modifications (write/edit tool) — auto-open and highlight
-    const onAIFileModified = (/** @type {CustomEvent} */ e) => {
+    onAIFileModified = (/** @type {CustomEvent} */ e) => {
       const modifiedPath = e.detail?.path
       if (!modifiedPath) return
       if (groupId === 'group-1') {
@@ -774,7 +777,6 @@
     window.addEventListener('search:goto-line', gotoLineHandler)
 
     // Debug line highlight
-    let debugStateUnsub = null
     import('../stores/debug.js').then(({ debugState }) => {
       debugStateUnsub = debugState.subscribe(state => {
         if (!view) return
@@ -838,7 +840,7 @@
 
     // Update highlight when theme changes
     let prevThemeId = getStoreValue(currentTheme)
-    const themeUnsub = currentTheme.subscribe(themeId => {
+    themeUnsub = currentTheme.subscribe(themeId => {
       if (!view || themeId === prevThemeId) return
       prevThemeId = themeId
       view.dispatch({

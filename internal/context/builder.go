@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -74,6 +75,22 @@ func (b *Builder) BuildContextMessage(req provider.ChatRequest) string {
 	}
 
 	// === STABLE PREFIX (cacheable) ===
+
+	// 0. Git Context + Code Structure (branch, recent changes, code analysis)
+	if req.ProjectPath != "" {
+		gitCtx := b.getGitContext(req.ProjectPath)
+		if gitCtx != "" {
+			stableParts = append(stableParts, gitCtx)
+		}
+		// Add code structure summary for better code understanding
+		structures := AnalyzeProjectStructure(req.ProjectPath, 50)
+		if len(structures) > 0 {
+			summary := GetCodeSummary(structures)
+			if summary != "" {
+				stableParts = append(stableParts, "[Code Structure]\n"+summary)
+			}
+		}
+	}
 
 	// 1. Project Rules (most stable — rarely changes)
 	if req.ProjectPath != "" {
@@ -222,10 +239,26 @@ func (b *Builder) GetModelContextWindow(_, modelID string) int {
 }
 
 // SummarizeAndCompressWithFlag compresses messages and returns whether summarization occurred.
-func (b *Builder) SummarizeAndCompressWithFlag(messages []provider.Message, maxTokens int, providerID string) ([]provider.Message, bool) {
+// If conversationID is provided, the summary is persisted to the conversation.
+func (b *Builder) SummarizeAndCompressWithFlag(messages []provider.Message, maxTokens int, providerID string, conversationID string) ([]provider.Message, bool) {
 	original := len(messages)
 	result := b.summarizeAndCompress(messages, maxTokens, providerID)
 	didSummarize := len(result) < original && original > 8
+
+	// Persist summary to conversation if we summarized and have a conversation ID
+	if didSummarize && conversationID != "" && b.memoryStore != nil {
+		for _, msg := range result {
+			if msg.Role == "system" && strings.HasPrefix(msg.Content, "[对话历史摘要]") {
+				summary := strings.TrimPrefix(msg.Content, "[对话历史摘要]\n")
+				summary = strings.Split(summary, "\n[请基于")[0]
+				if err := b.memoryStore.UpdateConversationSummary(conversationID, summary); err != nil {
+					log.Printf("Failed to persist conversation summary: %v", err)
+				}
+				break
+			}
+		}
+	}
+
 	return result, didSummarize
 }
 
@@ -324,32 +357,95 @@ func (b *Builder) getProjectStructure(projectPath string) string {
 	return content
 }
 
-func (b *Builder) scanProjectStructure(projectPath string) string {
-	entries, err := os.ReadDir(projectPath)
-	if err != nil {
-		return ""
+// languagePriority returns a priority score for file extensions.
+// Higher score = more important for context (entry points, configs, core files).
+func languagePriority(ext string) int {
+	switch ext {
+	case ".go", ".py", ".rs", ".java", ".ts", ".tsx", ".jsx":
+		return 3 // Source code
+	case ".js", ".vue", ".svelte":
+		return 3
+	case ".json", ".yaml", ".yml", ".toml", ".ini", ".env":
+		return 2 // Config files
+	case ".md", ".txt", ".rst":
+		return 1 // Documentation
+	case ".test.js", ".test.ts", "_test.go", ".spec.js":
+		return 2 // Tests are important
+	default:
+		return 0
 	}
+}
+
+func (b *Builder) scanProjectStructure(projectPath string) string {
 	var lines []string
 	dirCount := 0
 	fileCount := 0
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".") && entry.Name() != ".gitignore" {
-			continue
+	totalItems := 0
+	const maxDirs = 25
+	const maxFiles = 40
+	const maxDepth = 3
+	const maxTotal = 80
+
+	var scanDir func(path string, depth int, prefix string)
+	scanDir = func(path string, depth int, prefix string) {
+		if depth > maxDepth || totalItems >= maxTotal {
+			return
 		}
-		if entry.IsDir() {
-			subEntries, err := os.ReadDir(filepath.Join(projectPath, entry.Name()))
+
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return
+		}
+
+		// Sort entries: dirs first, then files by priority
+		type entryInfo struct {
+			entry    os.DirEntry
+			priority int
+		}
+		var dirs []entryInfo
+		var files []entryInfo
+
+		for _, entry := range entries {
+			name := entry.Name()
+			if strings.HasPrefix(name, ".") && name != ".gitignore" {
+				continue
+			}
+			// Skip common non-essential directories
+			if entry.IsDir() && (name == "node_modules" || name == "vendor" || name == "__pycache__" ||
+				name == ".git" || name == "dist" || name == "build" || name == "target" || name == ".cache") {
+				continue
+			}
+			if entry.IsDir() {
+				dirs = append(dirs, entryInfo{entry: entry, priority: 0})
+			} else {
+				ext := filepath.Ext(name)
+				priority := languagePriority(ext)
+				files = append(files, entryInfo{entry: entry, priority: priority})
+			}
+		}
+
+		// Process directories
+		for _, ei := range dirs {
+			if dirCount >= maxDirs {
+				lines = append(lines, prefix+"  ... (more directories)")
+				return
+			}
+			subPath := filepath.Join(path, ei.entry.Name())
+			subEntries, err := os.ReadDir(subPath)
 			subCount := 0
 			if err == nil {
 				subCount = len(subEntries)
 			}
-			lines = append(lines, fmt.Sprintf("  📁 %s/ (%d items)", entry.Name(), subCount))
+			lines = append(lines, fmt.Sprintf("%s📁 %s/ (%d items)", prefix, ei.entry.Name(), subCount))
 			dirCount++
-			if dirCount >= 20 {
-				lines = append(lines, "  ... (more directories)")
-				break
-			}
-		} else {
-			info, err := entry.Info()
+			totalItems++
+			scanDir(subPath, depth+1, prefix+"  ")
+		}
+
+		// Process files (sorted by priority, higher first)
+		for i := 0; i < len(files) && fileCount < maxFiles && totalItems < maxTotal; i++ {
+			ei := files[i]
+			info, err := ei.entry.Info()
 			var size int64
 			if err == nil {
 				size = info.Size()
@@ -360,14 +456,13 @@ func (b *Builder) scanProjectStructure(projectPath string) string {
 			} else if size > 1024 {
 				sizeStr = fmt.Sprintf(" (%dKB)", size/1024)
 			}
-			lines = append(lines, fmt.Sprintf("  📄 %s%s", entry.Name(), sizeStr))
+			lines = append(lines, fmt.Sprintf("%s📄 %s%s", prefix, ei.entry.Name(), sizeStr))
 			fileCount++
-			if fileCount >= 30 {
-				lines = append(lines, "  ... (more files)")
-				break
-			}
+			totalItems++
 		}
 	}
+
+	scanDir(projectPath, 0, "")
 	if len(lines) == 0 {
 		return ""
 	}
@@ -556,18 +651,51 @@ func (b *Builder) injectKnowledge(projectPath, userMessage string) string {
 	maxKnowledgeChars := 4000
 
 	var selected []memory.Knowledge
-	keywords := extractKeywords(userMessage)
 
-	for _, entry := range entries {
-		if len(selected) >= maxKnowledgeEntries {
-			break
+	// Try semantic search first (RAG-based)
+	if b.ragSearch != nil && userMessage != "" {
+		results, ragErr := b.ragSearch(context.Background(), projectPath, userMessage, 5)
+		if ragErr == nil && len(results) > 0 {
+			// Map RAG results back to knowledge entries by path
+			for _, r := range results {
+				if len(selected) >= maxKnowledgeEntries {
+					break
+				}
+				for _, entry := range entries {
+					if entry.Key == r.Path || strings.Contains(entry.Value, r.Path) {
+						selected = append(selected, entry)
+						break
+					}
+				}
+			}
 		}
-		if entry.Category == "analysis" || entry.Category == "preference" || entry.Category == "pattern" {
-			selected = append(selected, entry)
-			continue
-		}
-		if len(keywords) > 0 && containsAnyKeyword(entry.Value, keywords) {
-			selected = append(selected, entry)
+	}
+
+	// Fall back to keyword matching if RAG didn't find enough
+	if len(selected) < maxKnowledgeEntries {
+		keywords := extractKeywords(userMessage)
+		for _, entry := range entries {
+			if len(selected) >= maxKnowledgeEntries {
+				break
+			}
+			// Skip if already selected
+			alreadySelected := false
+			for _, s := range selected {
+				if s.ID == entry.ID {
+					alreadySelected = true
+					break
+				}
+			}
+			if alreadySelected {
+				continue
+			}
+			if entry.Category == "analysis" || entry.Category == "preference" || entry.Category == "pattern" {
+				selected = append(selected, entry)
+				continue
+			}
+			if len(keywords) > 0 && containsAnyKeyword(entry.Value, keywords) {
+				selected = append(selected, entry)
+			}
 		}
 	}
 
@@ -722,4 +850,46 @@ func smartTruncate(content string, maxLen int) string {
 
 	omittedLines := strings.Count(content, "\n") - strings.Count(head, "\n") - strings.Count(tail, "\n")
 	return head + fmt.Sprintf("\n... [omitted %d lines] ...\n", omittedLines) + tail
+}
+
+// getGitContext retrieves git context information for the project.
+// Returns branch name, recent commits, and recent diff summary.
+func (b *Builder) getGitContext(projectPath string) string {
+	var parts []string
+
+	// Get current branch
+	if branch := execGit(projectPath, "branch", "--show-current"); branch != "" {
+		parts = append(parts, "[Git Context]\nCurrent branch: "+branch)
+	}
+
+	// Get recent commits (last 5)
+	if log := execGit(projectPath, "log", "--oneline", "-5"); log != "" {
+		parts = append(parts, "Recent commits:\n"+log)
+	}
+
+	// Get recent diff summary (unstaged changes)
+	if diff := execGit(projectPath, "diff", "--stat"); diff != "" {
+		parts = append(parts, "Unstaged changes:\n"+diff)
+	}
+
+	// Get staged changes summary
+	if diff := execGit(projectPath, "diff", "--cached", "--stat"); diff != "" {
+		parts = append(parts, "Staged changes:\n"+diff)
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "\n") + "\n\n"
+}
+
+// execGit runs a git command and returns the output.
+func execGit(projectPath string, args ...string) string {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = projectPath
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }

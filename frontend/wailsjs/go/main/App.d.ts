@@ -38,6 +38,10 @@ export function AnalyzeProject(arg1:string):Promise<string>;
 
 export function ApplyDiff(arg1:main.ApplyDiffRequest):Promise<void>;
 
+export function CanRedoFileChange():Promise<boolean>;
+
+export function CanUndoFileChange():Promise<boolean>;
+
 export function CheckCommandExists(arg1:string):Promise<boolean>;
 
 export function ClearTokenUsage():Promise<void>;
@@ -290,6 +294,8 @@ export function ReadFile(arg1:string):Promise<string>;
 
 export function ReadFileWithLSP(arg1:string):Promise<string>;
 
+export function RedoFileChange():Promise<string>;
+
 export function RemoveLSPServer(arg1:string):Promise<void>;
 
 export function RemoveMCPServer(arg1:string):Promise<void>;
@@ -357,6 +363,8 @@ export function TerminalResize(arg1:string,arg2:number,arg3:number):Promise<void
 export function TerminalWrite(arg1:string,arg2:string):Promise<void>;
 
 export function TestProvider(arg1:string):Promise<void>;
+
+export function UndoFileChange():Promise<string>;
 
 export function VerifyFile(arg1:string):Promise<verify.VerificationResult>;
 

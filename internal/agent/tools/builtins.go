@@ -7,6 +7,7 @@ func AllTools() []agent.Tool {
 		NewReadFileTool(),
 		NewWriteFileTool(),
 		NewEditFileTool(),
+		NewMultiEditTool(),
 		NewSearchFilesTool(),
 		NewGlobTool(),
 		NewListDirectoryTool(),

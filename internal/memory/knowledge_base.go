@@ -1,6 +1,9 @@
 package memory
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 type Knowledge struct {
 	ID          string `json:"id"`
@@ -87,4 +90,42 @@ func (s *Store) DeleteKnowledge(id string) error {
 		return fmt.Errorf("knowledge %s not found", id)
 	}
 	return nil
+}
+
+// LearnPreference records a user preference observation.
+func (s *Store) LearnPreference(projectPath, key, value, source string) error {
+	entry := &Knowledge{
+		ID:          fmt.Sprintf("pref_%d", time.Now().UnixNano()),
+		ProjectPath: projectPath,
+		Category:    "preference",
+		Key:         key,
+		Value:       value,
+		Source:      source,
+		UpdatedAt:   time.Now().Format(time.RFC3339),
+	}
+	return s.SaveKnowledge(entry)
+}
+
+// LearnPattern records an observed coding pattern.
+func (s *Store) LearnPattern(projectPath, pattern, description string) error {
+	entry := &Knowledge{
+		ID:          fmt.Sprintf("pat_%d", time.Now().UnixNano()),
+		ProjectPath: projectPath,
+		Category:    "pattern",
+		Key:         pattern,
+		Value:       description,
+		Source:      "observed",
+		UpdatedAt:   time.Now().Format(time.RFC3339),
+	}
+	return s.SaveKnowledge(entry)
+}
+
+// GetPreferences returns all learned preferences for a project.
+func (s *Store) GetPreferences(projectPath string) ([]Knowledge, error) {
+	return s.GetKnowledgeByCategory(projectPath, "preference")
+}
+
+// GetPatterns returns all observed patterns for a project.
+func (s *Store) GetPatterns(projectPath string) ([]Knowledge, error) {
+	return s.GetKnowledgeByCategory(projectPath, "pattern")
 }

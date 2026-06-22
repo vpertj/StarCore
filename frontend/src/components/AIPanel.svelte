@@ -369,11 +369,7 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
    contextFiles.update(files => files.filter((_, i) => i !== index))
  }
 
- function removeContextCode() {
-    // contextCode removed
- }
-
- /** @param {{name: string, path: string, isDir: boolean, children: any[]}[]} tree */
+  /** @param {{name: string, path: string, isDir: boolean, children: any[]}[]} tree */
  function flattenFileTree(tree) {
    /** @type {string[]} */ let result = []
    for (const node of tree) {
@@ -524,7 +520,7 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
       contextFiles={$contextFiles}
       {diagnostics}
       onremovefile={removeContextFile}
-      onremovecode={removeContextCode}
+      onremovecode={() => {}}
     />
 
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
@@ -535,7 +531,7 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
       role="region"
       onclick={handleMessageClick}
     >
-      {#if $messages.length === 0}
+      {#if $messages.length === 0 && $toolCalls.length === 0}
         <div class="flex items-center justify-center h-full">
           <div class="text-center">
             <div class="w-14 h-14 mx-auto mb-4 rounded-2xl flex items-center justify-center" style="background: linear-gradient(135deg, rgba(0,120,212,0.15), rgba(78,201,176,0.15));">
@@ -546,15 +542,18 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
             <p class="text-sm font-medium" style="color: var(--text-primary);">{$t('ai.panel.title')}</p>
             <p class="text-xs mt-1" style="color: var(--text-muted);">{$t('ai.panel.subtitle')}</p>
             <div class="mt-5 space-y-2">
-              <button class="btn btn-ghost w-full justify-start text-xs" onclick={() => { inputValue = '@'; handleSend(); }}>
+              <button class="btn btn-ghost w-full justify-start text-xs" onclick={() => { inputValue = '@'; textareaEl?.focus(); }}>
                 <span class="chip chip-accent">@</span> {$t('ai.panel.refFile').replace('@ ','')}
               </button>
-              <button class="btn btn-ghost w-full justify-start text-xs" onclick={() => { inputValue = '/'; handleSend(); }}>
+              <button class="btn btn-ghost w-full justify-start text-xs" onclick={() => { inputValue = '/'; textareaEl?.focus(); }}>
                 <span class="chip chip-ai">/</span> {$t('ai.panel.execSkill').replace('/ ','')}
               </button>
             </div>
           </div>
         </div>
+      {/if}
+
+      <!-- Tool calls (always visible, regardless of messages) -->
       {#if $toolCalls.length > 0}
           {#each $toolCalls as tc}
             {@const fm = tc.fileMeta}
@@ -611,9 +610,7 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
           {/each}
         {/if}
 
-        
-
-        {:else}
+        {#if $messages.length > 0}
         {#each $messages as message, msgIdx}
           {#if message.role === 'tool'}
             {@const toolMeta = (() => { try { return JSON.parse(message.metadata || '{}') } catch { return {} } })()}
@@ -724,6 +721,7 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
           </div>
           {/if}
         {/each}
+        {/if}
 
         {#if $isGenerating}
           <div class="flex gap-3" in:fade={{ duration: 200 }}>
@@ -738,10 +736,9 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
           </div>
         {/if}
 
-        {@const diff = /** @type {{filePath: string, hunks: any[]}|null} */ ($pendingDiff)}
-        {#if $diffVisible && diff}
-          {@const diffHunks = diff.hunks}
-          {@const diffFilePath = diff.filePath}
+        {#if $diffVisible && $pendingDiff}
+          {@const diffHunks = $pendingDiff.hunks}
+          {@const diffFilePath = $pendingDiff.filePath}
           <div class="mt-4" in:fade>
             <div class="flex items-center justify-between mb-2">
               <span class="text-xs font-medium" style="color: var(--error);">Diff Preview</span>
@@ -791,7 +788,6 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
             {/if}
           </div>
         {/if}
-      {/if}
     </div>
 
     <div class="p-3 border-t" style="border-color: var(--border);">

@@ -376,9 +376,14 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ChatRequest) (<-
 			return
 		}
 
-		var currentToolID string
-		var currentToolName string
-		var currentToolArgs strings.Builder
+		// Track multiple pending tool calls (Anthropic can return parallel tool_use blocks)
+		type pendingTool struct {
+			id   string
+			name string
+			args strings.Builder
+		}
+		pendingTools := make(map[string]*pendingTool)
+		var activeToolID string
 		receivedDone := false
 		var lastUsage *TokenUsage
 
@@ -419,20 +424,23 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ChatRequest) (<-
 			switch event.Type {
 			case "content_block_start":
 				if event.ContentBlock != nil && event.ContentBlock.Type == "tool_use" {
-					currentToolID = event.ContentBlock.ID
-					currentToolName = event.ContentBlock.Name
-					currentToolArgs.Reset()
+					activeToolID = event.ContentBlock.ID
+					pendingTools[activeToolID] = &pendingTool{
+						id:   event.ContentBlock.ID,
+						name: event.ContentBlock.Name,
+					}
 				}
 			case "content_block_delta":
 				if event.Delta != nil {
 					if event.Delta.Type == "text" && event.Delta.Text != "" {
 						ch <- StreamEvent{Type: "data", Content: event.Delta.Text}
 					} else if event.Delta.Type == "input_json_delta" && event.Delta.PartialJSON != "" {
-						currentToolArgs.WriteString(event.Delta.PartialJSON)
+						if tool, ok := pendingTools[activeToolID]; ok {
+							tool.args.WriteString(event.Delta.PartialJSON)
+						}
 					}
 				}
 			case "message_delta":
-				// Capture usage from message_delta event
 				if event.Usage != nil {
 					lastUsage = &TokenUsage{
 						PromptTokens:     event.Usage.InputTokens,
@@ -442,21 +450,20 @@ func (p *AnthropicProvider) ChatStream(ctx context.Context, req ChatRequest) (<-
 				}
 			case "message_stop":
 				receivedDone = true
-				// Flush any pending tool call
-				if currentToolID != "" && currentToolName != "" {
-					ch <- StreamEvent{
-						Type: "tool_call",
-						Name: currentToolName,
-						Args: currentToolArgs.String(),
-						ToolCalls: []ToolCall{{
-							ID:   currentToolID,
+				// Flush ALL pending tool calls (supports parallel tools)
+				if len(pendingTools) > 0 {
+					toolCalls := make([]ToolCall, 0, len(pendingTools))
+					for _, tool := range pendingTools {
+						toolCalls = append(toolCalls, ToolCall{
+							ID:   tool.id,
 							Type: "function",
 							Function: ToolCallFunc{
-								Name:      currentToolName,
-								Arguments: currentToolArgs.String(),
+								Name:      tool.name,
+								Arguments: tool.args.String(),
 							},
-						}},
+						})
 					}
+					ch <- StreamEvent{Type: "tool_call", ToolCalls: toolCalls}
 				}
 				ch <- StreamEvent{Type: "done", Usage: lastUsage}
 				return

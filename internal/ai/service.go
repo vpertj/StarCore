@@ -65,7 +65,7 @@ type EmitFunc func(event string, data interface{})
 type ContextBuilder func(req provider.ChatRequest) string
 
 // Compressor compresses messages to fit context windows.
-type Compressor func(msgs []provider.Message, maxTokens int, providerID string) ([]provider.Message, bool)
+type Compressor func(msgs []provider.Message, maxTokens int, providerID string, conversationID string) ([]provider.Message, bool)
 
 // ContextWindowEstimator estimates the context window size for a model.
 type ContextWindowEstimator func(providerID, modelID string) int
@@ -100,7 +100,33 @@ type Service struct {
 	currentConvID     string
 	continueCh        chan int
 	autoContinueCount int // frontend can send extra loops via this channel
+
+	// Token budget tracking
+	totalTokensUsed int
+	contextWindowFn ContextWindowEstimator
+
+	// File change history for undo/redo
+	fileHistory *agentTools.FileHistory
+
+	// Agent loop progress tracker
+	progress *AgentProgress
 }
+
+// AgentProgress tracks progress within a single agent loop session.
+type AgentProgress struct {
+	filesModified   map[string]bool // files that have been written/edited
+	toolCallCount   int             // total tool calls made
+	successfulCalls int             // tool calls that succeeded
+	consecutiveEmpty int            // consecutive rounds with no tool calls
+	lastFileCount   int             // file count at last nudge
+}
+
+func newAgentProgress() *AgentProgress {
+	return &AgentProgress{
+		filesModified: make(map[string]bool),
+	}
+}
+
 
 // NewService creates a new AI service.
 func NewService(
@@ -118,20 +144,23 @@ func NewService(
 	ls := agentTools.NewLoopState()
 	agentTools.LoopStateRef = ls
 	return &Service{
-		providerMgr:   providerMgr,
-		toolExec:      toolExec,
-		memoryStore:   memoryStore,
-		agentReg:      agentReg,
-		emitFn:        emitFn,
-		buildContext:  buildContext,
-		compress:      compress,
-		contextWindow: contextWindow,
-		appCtx:        appCtx,
-		loopState:     ls,
-		verifyFn:      verifyFn,
-		continueCh:    make(chan int, 1),
-		cb:            NewCircuitBreaker(10, 60*time.Second),
-		sem:           make(chan struct{}, 3),
+		providerMgr:    providerMgr,
+		toolExec:       toolExec,
+		memoryStore:    memoryStore,
+		agentReg:       agentReg,
+		emitFn:         emitFn,
+		buildContext:   buildContext,
+		compress:       compress,
+		contextWindow:  contextWindow,
+		contextWindowFn: contextWindow,
+		appCtx:         appCtx,
+		loopState:      ls,
+		verifyFn:       verifyFn,
+		continueCh:     make(chan int, 1),
+		cb:             NewCircuitBreaker(10, 60*time.Second),
+		sem:            make(chan struct{}, 3),
+		fileHistory:    agentTools.NewFileHistory(),
+		progress:       newAgentProgress(),
 	}
 }
 
@@ -267,12 +296,30 @@ func buildToolSuppressHint(msgs []provider.Message) string {
 	return prompt("suppress_hint")
 }
 
-var languageHint = prompt("language_hint")
+// getLanguageHint returns a model-aware language instruction.
+// DeepSeek/Chinese models: strong Chinese instruction (they respond natively in Chinese)
+// GPT/Claude: match user language (they default to English for reasoning)
+func getLanguageHint(model string) string {
+	m := strings.ToLower(model)
+
+	// Chinese-native models — use strong Chinese instruction
+	if strings.Contains(m, "deepseek") || strings.Contains(m, "qwen") || strings.Contains(m, "yi") {
+		return "❗ 语言要求：始终使用中文回复。包括思考过程、代码注释、提交信息、错误分析等所有内容都必须使用中文。唯一例外是代码本身（变量名、函数名等使用英文）。\n"
+	}
+
+	// English-primary models — match user language
+	if prompt("language_hint") != "language_hint" {
+		return prompt("language_hint")
+	}
+	return "用和用户相同的语言回答。用户用中文提问就用中文回答，用户用英文提问就用英文回答。\n"
+}
 
 // --- 规划模式 ---
 // 对标 Cursor Plan Mode：只读分析，输出结构化的实施方案。
 const planModePrompt = `
 === 规划模式 ===
+❗ 语言要求：始终使用中文回复。包括思考过程、分析报告、实施计划等所有内容都必须使用中文。
+
 你是一个资深软件架构师，负责分析需求并制定精准的实施方案。
 你的职责是分析——不是实现。禁止写文件、禁止执行命令。
 
@@ -312,6 +359,8 @@ const planModePrompt = `
 // 对标 Claude Code Build Mode：自主编程智能体，完整的工程纪律。
 const buildModePrompt = `
 === 构建模式 ===
+❗ 语言要求：始终使用中文回复。包括思考过程、代码注释、提交信息、错误分析等所有内容都必须使用中文。唯一例外是代码本身（变量名、函数名等使用英文）。
+
 你是一个拥有完整文件系统访问权限的自主编程智能体。你的目标是精准、安全、高质量地完成每一个编程任务。
 
 **❗ 核心铁律：任务未完成之前绝对不要结束对话。** 实现代码后必须立即运行验证命令。验证失败 → 分析错误原因 → 修复代码 → 重新验证 → 反复循环直到通过。跳过验证步骤直接报告完成是绝对禁止的。只有所有改动验证通过、且用户需求全部实现后，你才能报告"已完成"。
@@ -322,6 +371,13 @@ const buildModePrompt = `
 3. **实现**：使用工具完成修改。每次改动后简要说明改了什么
 4. **验证**：改完代码后必须运行验证命令。Go 项目跑 (go build ./...) 和 (go vet ./...)；前端项目跑 'npm run build'；有测试则跑测试。如果验证失败，分析错误并修复，直到通过
 5. **报告**：任务完成后总结所有变更
+
+## 任务分解
+对于复杂任务（涉及多个文件、多个步骤），在开始执行前先分解为子任务：
+1. 列出所有需要修改的文件
+2. 确定修改顺序（有依赖关系的先做）
+3. 每个子任务独立验证
+4. 如果某个子任务可以独立完成，使用 sub_agent 工具并行执行
 
 ## 编码规范
 - 优先使用 Edit（精确替换）而不是 Write（整体覆写），减少出错范围
@@ -363,6 +419,8 @@ const buildModePrompt = `
 // 对标 Claude Code Chat Mode：只读分析，精准解答。
 const chatModePrompt = `
 === 对话模式 ===
+❗ 语言要求：始终使用中文回复。包括代码分析、建议、解释等所有内容都必须使用中文。唯一例外是代码本身（变量名、函数名等使用英文）。
+
 你是一个资深软件工程师，正在与开发者进行技术对话。
 你的角色是理解问题、阅读代码、给出精准的答案和建议。
 
@@ -448,7 +506,7 @@ func (s *Service) ChatStream(req provider.ChatRequest) error {
 			if req.Mode == "build" {
 				modePrompt += buildToolSuppressHint(req.Messages)
 			}
-			systemMsg := provider.Message{Role: "system", Content: ag.SystemPrompt + languageHint + modePrompt}
+			systemMsg := provider.Message{Role: "system", Content: ag.SystemPrompt + getLanguageHint(req.Model) + modePrompt}
 			req.Messages = append([]provider.Message{systemMsg}, req.Messages...)
 		}
 		if ok && len(ag.Tools) > 0 {
@@ -522,10 +580,21 @@ func (s *Service) ChatStream(req provider.ChatRequest) error {
 
 	modelCtxWindow := s.contextWindow(req.ProviderID, req.Model)
 	maxContextTokens := int(float64(modelCtxWindow) * 0.8)
-	compressed, didSummarize := s.compress(req.Messages, maxContextTokens, req.ProviderID)
+	compressed, didSummarize := s.compress(req.Messages, maxContextTokens, req.ProviderID, req.ConversationID)
 	req.Messages = compressed
 	if didSummarize {
 		s.emitFn("ai:context:summarized", "上下文已自动压缩，旧消息摘要已保留")
+	}
+
+	// Token budget warning — check if we're approaching the limit
+	totalMsgTokens := 0
+	for _, msg := range req.Messages {
+		totalMsgTokens += estimateTokens(msg.Content)
+	}
+	s.totalTokensUsed += totalMsgTokens
+	usagePercent := float64(totalMsgTokens) / float64(maxContextTokens) * 100
+	if usagePercent > 70 {
+		s.emitFn("ai:context:warning", fmt.Sprintf("上下文使用率 %.0f%%，接近上限。建议开始新对话或等待自动压缩。", usagePercent))
 	}
 
 	// Start ask_user notification forwarder
@@ -572,7 +641,7 @@ func (s *Service) Chat(req provider.ChatRequest) (string, error) {
 	if req.AgentID != "" {
 		ag, ok := s.agentReg.Get(req.AgentID)
 		if ok && ag.SystemPrompt != "" {
-			systemMsg := provider.Message{Role: "system", Content: ag.SystemPrompt + languageHint}
+			systemMsg := provider.Message{Role: "system", Content: ag.SystemPrompt + getLanguageHint(req.Model)}
 			req.Messages = append([]provider.Message{systemMsg}, req.Messages...)
 		}
 	}
@@ -715,7 +784,7 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 
 	var prevMsgCount int
 	var nudgeCount int
-	const maxNudges = 2
+	s.progress = newAgentProgress()
 	maxLoops := calcMaxAgentLoops(req.Mode, req.Model)
 	warningAt := maxLoops - 3
 	if warningAt < 1 {
@@ -927,23 +996,8 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 			}
 
 			if req.Mode == "build" || req.Mode == "plan" {
-				// Check if AI seems to have completed its task
-				completionSignals := []string{
-					"已完成", "完成", "任务完成", "总结", "总结如下", "以上是",
-					"done", "completed", "finished", "summary", "in summary",
-					"---", "规划完成", "实施计划", "风险与依赖",
-				}
-				lowerContent := strings.ToLower(assistantContent)
-				isComplete := false
-				for _, signal := range completionSignals {
-					if strings.Contains(lowerContent, signal) {
-						isComplete = true
-						break
-					}
-				}
-
-				// Check if this is a non-technical response (greeting, question, etc.)
-				// that doesn't require tool calls
+				// Check if this is a non-technical exchange (greeting, simple question)
+				// that doesn't require tool calls — exit immediately
 				isNonTechnical := false
 				lastUserMsg := ""
 				for i := len(currentReq.Messages) - 1; i >= 0; i-- {
@@ -953,10 +1007,8 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 					}
 				}
 				nonTechnicalPatterns := []string{
-					"你好", "hello", "hi", "嗨", "hey",
+					"你好", "hello", "hi ", "嗨", "hey",
 					"谢谢", "thanks", "thank you",
-					"什么是", "怎么理解", "解释一下", "是什么意思",
-					"what is", "how does", "explain", "what does",
 				}
 				for _, pattern := range nonTechnicalPatterns {
 					if strings.Contains(lastUserMsg, pattern) {
@@ -964,12 +1016,7 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 						break
 					}
 				}
-
-				// Also check if response is short and non-actionable (<200 chars, no file paths)
-				isShortResponse := len(assistantContent) < 200 && !strings.Contains(assistantContent, "/") && !strings.Contains(assistantContent, "```")
-
-				// If AI seems to have completed, or this is a non-technical exchange, don't push for tools
-				if isComplete || isNonTechnical || isShortResponse {
+				if isNonTechnical {
 					donePayload := map[string]interface{}{}
 					if streamUsage != nil {
 						donePayload["usage"] = streamUsage
@@ -979,24 +1026,52 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 					return
 				}
 
-				// Only nudge if we haven't nudged too many times
-				if !toolCallsSeen && assistantContent != "" && nudgeCount < maxNudges {
-					nudgeCount++
-					toolNames := make([]string, 0, len(currentReq.Tools))
-					for _, t := range currentReq.Tools {
-						toolNames = append(toolNames, t.Function.Name)
+			// If no tool calls were made, nudge the AI to continue
+			if !toolCallsSeen && assistantContent != "" {
+				s.progress.recordEmptyRound()
+				maxNudges := s.progress.calculateMaxNudges()
+				if nudgeCount < maxNudges {
+						nudgeCount++
+						toolNames := make([]string, 0, len(currentReq.Tools))
+						for _, t := range currentReq.Tools {
+							toolNames = append(toolNames, t.Function.Name)
+						}
+						currentReq.Messages = append(currentReq.Messages, provider.Message{
+							Role:    "assistant",
+							Content: assistantContent,
+						})
+						currentReq.Messages = append(currentReq.Messages, provider.Message{
+							Role:    "user",
+							Content: fmt.Sprintf("你的回复中没有调用工具。如果任务尚未完成，请直接调用工具继续执行（可用工具: %s）。如果任务已完成，请在回复中明确说明「任务已完成」。", strings.Join(toolNames, ", ")),
+						})
+						s.emitFn("ai:stream:data", "\n\n*[系统: 等待工具调用...]*")
+						continue
 					}
-					currentReq.Messages = append(currentReq.Messages, provider.Message{
-						Role:    "assistant",
-						Content: assistantContent,
-					})
-					currentReq.Messages = append(currentReq.Messages, provider.Message{
-						Role:    "user",
-						Content: fmt.Sprintf("你的回复中没有调用工具。如果任务尚未完成，请直接调用工具继续执行（可用工具: %s）。如果任务已完成，请在回复中明确说明。", strings.Join(toolNames, ", ")),
-					})
-					s.emitFn("ai:stream:data", "\n\n*[系统: 等待工具调用...]*")
-					continue
+					// Nudge exhausted — check if AI explicitly said it's done
+					lowerContent := strings.ToLower(assistantContent)
+					explicitDone := strings.Contains(lowerContent, "任务已完成") ||
+						strings.Contains(lowerContent, "all tasks completed") ||
+						strings.Contains(lowerContent, "所有任务已完成")
+					if explicitDone {
+						donePayload := map[string]interface{}{}
+						if streamUsage != nil {
+							donePayload["usage"] = streamUsage
+						}
+						s.emitFn("ai:stream:done", donePayload)
+						doneEmitted = true
+						return
+					}
+					// Still not done but nudged out — emit done with warning
+					s.emitFn("ai:stream:data", "\n\n*[系统: 已达到最大提示次数，请手动发送「继续」以继续执行]*")
+					donePayload := map[string]interface{}{}
+					if streamUsage != nil {
+						donePayload["usage"] = streamUsage
+					}
+					s.emitFn("ai:stream:done", donePayload)
+					doneEmitted = true
+					return
 				}
+				// If tool calls were seen, the loop continues naturally
 			}
 
 			donePayload := map[string]interface{}{}
@@ -1005,6 +1080,12 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 			}
 			s.emitFn("ai:stream:done", donePayload)
 			doneEmitted = true
+
+			// Learn user preferences from this conversation (async, non-blocking)
+			if s.memoryStore != nil && req.ProjectPath != "" {
+				go s.learnPreferences(req, assistantContent, toolCalls)
+			}
+
 			return
 		}
 
@@ -1015,6 +1096,7 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 		currentReq.Messages = append(currentReq.Messages, assistantMsg)
 
 		// All tools execute automatically — mode already controls which tools are available.
+		s.progress.resetEmptyRounds()
 		var calls []agent.ToolCall
 		for _, tc := range toolCalls {
 			call := agent.ToolCall{
@@ -1088,7 +1170,14 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 						rc = rc[:maxToolResultChars] + "... [truncated]"
 					}
 					currentReq.Messages = append(currentReq.Messages, provider.Message{Role: "tool", Content: rc, ToolCallID: tr.call.ID, Name: tr.call.Name})
+					// Track progress
+					filePath := ""
+					if tr.result.FileMeta != nil {
+						filePath = tr.result.FileMeta.FilePath
+					}
+					s.progress.recordToolCall(tr.call.Name, true, filePath)
 				}
+			}
 			}
 		}
 
@@ -1189,6 +1278,56 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 	doneEmitted = true
 }
 
+// learnPreferences analyzes the conversation and saves observed user preferences.
+func (s *Service) learnPreferences(req provider.ChatRequest, assistantContent string, toolCalls []provider.ToolCall) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("learnPreferences panic: %v", r)
+		}
+	}()
+
+	// Observe coding style preferences from tool arguments
+	for _, tc := range toolCalls {
+		if tc.Function.Name == "write_file" || tc.Function.Name == "edit_file" {
+			// Check if user uses specific formatting patterns
+			if args, err := parseToolArgs(tc.Function.Arguments); err == nil {
+				if content, ok := args["content"].(string); ok {
+					// Detect indentation preference
+					if strings.Contains(content, "\t") {
+						s.memoryStore.LearnPreference(req.ProjectPath, "indentation", "tabs", "observed")
+					} else if strings.Contains(content, "    ") {
+						s.memoryStore.LearnPreference(req.ProjectPath, "indentation", "4 spaces", "observed")
+					}
+					// Detect line ending preference
+					if strings.Contains(content, "\r\n") {
+						s.memoryStore.LearnPreference(req.ProjectPath, "line_endings", "crlf", "observed")
+					}
+				}
+			}
+		}
+	}
+
+	// Observe project structure patterns from the assistant's response
+	if assistantContent != "" {
+		// Detect if the project uses specific frameworks
+		frameworks := []string{"react", "vue", "svelte", "angular", "next", "nuxt", "express", "fastapi", "gin", "echo"}
+		for _, fw := range frameworks {
+			if strings.Contains(strings.ToLower(assistantContent), fw) {
+				s.memoryStore.LearnPattern(req.ProjectPath, "framework:"+fw, "Detected in conversation")
+			}
+		}
+	}
+}
+
+// parseToolArgs parses tool call arguments from JSON string.
+func parseToolArgs(argsStr string) (map[string]any, error) {
+	var args map[string]any
+	if err := json.Unmarshal([]byte(argsStr), &args); err != nil {
+		return nil, err
+	}
+	return args, nil
+}
+
 // forwardAskUserRequests monitors the ask_user notification channel and
 // emits events to the Wails frontend so the user sees the question.
 func (s *Service) forwardAskUserRequests(ctx context.Context) {
@@ -1253,4 +1392,127 @@ func extractFileMeta(name string, args map[string]any) *agent.FileMeta {
 	default:
 		return nil
 	}
+}
+
+// UndoFileChange reverts the last file change.
+func (s *Service) UndoFileChange() (string, error) {
+	change, err := s.fileHistory.Undo()
+	if err != nil {
+		return "", err
+	}
+	if change == nil {
+		return "", nil
+	}
+	return fmt.Sprintf("Reverted %s (%s)", change.FilePath, change.Description), nil
+}
+
+// RedoFileChange re-applies the last undone file change.
+func (s *Service) RedoFileChange() (string, error) {
+	change, err := s.fileHistory.Redo()
+	if err != nil {
+		return "", err
+	}
+	if change == nil {
+		return "", nil
+	}
+	return fmt.Sprintf("Re-applied %s (%s)", change.FilePath, change.Description), nil
+}
+
+// CanUndoFileChange returns whether undo is possible.
+func (s *Service) CanUndoFileChange() bool {
+	return s.fileHistory.CanUndo()
+}
+
+// CanRedoFileChange returns whether redo is possible.
+func (s *Service) CanRedoFileChange() bool {
+	return s.fileHistory.CanRedo()
+}
+
+// GetFileHistory returns the file change history.
+func (s *Service) GetFileHistory() []agentTools.FileChange {
+	return s.fileHistory.GetHistory()
+}
+
+// --- Agent Progress Tracking ---
+
+// recordToolCall tracks a tool call for progress analysis.
+func (p *AgentProgress) recordToolCall(name string, success bool, filePath string) {
+	p.toolCallCount++
+	if success {
+		p.successfulCalls++
+	}
+	if filePath != "" {
+		p.filesModified[filePath] = true
+	}
+}
+
+// recordEmptyRound tracks a round with no tool calls.
+func (p *AgentProgress) recordEmptyRound() {
+	p.consecutiveEmpty++
+}
+
+// resetEmptyRounds resets the consecutive empty counter when tools are called.
+func (p *AgentProgress) resetEmptyRounds() {
+	p.consecutiveEmpty = 0
+}
+
+// fileCount returns the number of files modified.
+func (p *AgentProgress) fileCount() int {
+	return len(p.filesModified)
+}
+
+// hasProgress returns true if the agent has made meaningful progress.
+func (p *AgentProgress) hasProgress() bool {
+	return p.fileCount() > 0 || p.successfulCalls > 3
+}
+
+// isStagnant returns true if the agent hasn't made progress in recent rounds.
+func (p *AgentProgress) isStagnant() bool {
+	return p.consecutiveEmpty >= 3 && !p.hasProgress()
+}
+
+// calculateMaxNudges dynamically determines the max nudge count based on task context.
+func (p *AgentProgress) calculateMaxNudges() int {
+	base := 3
+
+	// More files touched = more complex task = allow more rounds
+	if p.fileCount() > 5 {
+		base += 2
+	} else if p.fileCount() > 2 {
+		base += 1
+	}
+
+	// More successful tool calls = more complex task
+	if p.successfulCalls > 10 {
+		base += 2
+	} else if p.successfulCalls > 5 {
+		base += 1
+	}
+
+	// If stagnant (no progress + no empty rounds), reduce limit
+	if p.isStagnant() {
+		base = 2
+	}
+
+	// Cap at reasonable limits
+	if base < 2 {
+		base = 2
+	}
+	if base > 10 {
+		base = 10
+	}
+
+	return base
+}
+
+// shouldStop returns true if the agent loop should stop.
+func (p *AgentProgress) shouldStop(nudgeCount int) bool {
+	maxNudges := p.calculateMaxNudges()
+	return nudgeCount >= maxNudges
+}
+
+// getProgressSummary returns a human-readable summary of progress.
+func (p *AgentProgress) getProgressSummary() string {
+	return fmt.Sprintf("files=%d, toolCalls=%d, success=%d, empty=%d",
+		p.fileCount(), p.toolCallCount, p.successfulCalls, p.consecutiveEmpty)
 }

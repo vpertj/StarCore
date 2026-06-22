@@ -65,15 +65,19 @@ type ApplyDiffRequest struct {
 
 // CustomModelEntry stores a user-configured custom AI model.
 type CustomModelEntry struct {
-	ID           string `json:"id"`
-	ModelID      string `json:"modelId"`
-	Name         string `json:"name"`
-	ProviderID   string `json:"providerId"`
-	ProviderName string `json:"providerName"`
-	APIKey       string `json:"apiKey"`
-	Endpoint     string `json:"endpoint"`
-	Enabled      bool   `json:"enabled"`
-	MaxTokens    int    `json:"maxTokens"`
+	ID               string `json:"id"`
+	ModelID          string `json:"modelId"`
+	Name             string `json:"name"`
+	ProviderID       string `json:"providerId"`
+	GroupID          string `json:"groupId"`
+	ProviderName     string `json:"providerName"`
+	APIKey           string `json:"apiKey"`
+	Endpoint         string `json:"endpoint"`
+	Enabled          bool   `json:"enabled"`
+	MaxTokens        int    `json:"maxTokens"`
+	SupportsThinking bool   `json:"supportsThinking,omitempty"`
+	ContextWindow    int    `json:"contextWindow,omitempty"`
+	IsCustom         bool   `json:"isCustom,omitempty"`
 }
 
 // configDir returns the StarCore configuration directory.
@@ -831,6 +835,26 @@ func (a *App) AICompletion(providerID string, req provider.CompletionRequest) (s
 // StopGenerating cancels the current agent run.
 func (a *App) StopGenerating() {
 	a.aiService.Stop()
+}
+
+// UndoFileChange reverts the last file change.
+func (a *App) UndoFileChange() (string, error) {
+	return a.aiService.UndoFileChange()
+}
+
+// RedoFileChange re-applies the last undone file change.
+func (a *App) RedoFileChange() (string, error) {
+	return a.aiService.RedoFileChange()
+}
+
+// CanUndoFileChange returns whether undo is possible.
+func (a *App) CanUndoFileChange() bool {
+	return a.aiService.CanUndoFileChange()
+}
+
+// CanRedoFileChange returns whether redo is possible.
+func (a *App) CanRedoFileChange() bool {
+	return a.aiService.CanRedoFileChange()
 }
 
 // ContinueAgentLoop adds extra iterations to the running agent loop.

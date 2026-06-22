@@ -49,6 +49,19 @@
   let fetchedModelList = $state(/** @type {string[]} */ ([]));
   let selectedModelsToAdd = $state(/** @type {string[]} */ ([]));
 
+  // All available providers (builtin + custom) for the dropdown
+  let allProviders = $derived([
+    ...builtinProviders,
+    ...$customModels
+      .filter(m => m.groupId && !builtinProviders.some(bp => bp.id === m.groupId))
+      .reduce((acc, m) => {
+        if (!acc.find(p => p.id === m.groupId)) {
+          acc.push({ id: m.groupId, name: m.providerName || m.groupId, defaultEndpoint: m.endpoint || '' });
+        }
+        return acc;
+      }, /** @type {Array<{id:string,name:string,defaultEndpoint:string}>} */ ([]))
+  ]);
+
   let testingModelId = $state(/** @type {string|null} */ (null));
   let testModelResults = $state(
     /** @type {Record<string, {ok: boolean, msg: string}>} */ ({}),
@@ -62,8 +75,7 @@
   let pendingEditModels = $state(/** @type {Array<any>} */ ([]));
 
   let cardIds = $derived(
-    [...new Set($customModels.map(/** @param {any} m */ m => m.groupId || m.providerId))]
-      .filter(id => builtinProviders.some(bp => bp.id === id) || id.startsWith("custom_"))
+    [...new Set($customModels.map(/** @param {any} m */ m => m.groupId || m.providerId || "unknown"))]
   );
 
   let editExistingModels = $derived(
@@ -130,7 +142,7 @@
   }
 
   function onAddProviderChange() {
-    const p = builtinProviders.find((bp) => bp.id === addModelProvider);
+    const p = allProviders.find((bp) => bp.id === addModelProvider);
     addModelEndpoint = p?.defaultEndpoint || "";
     addModelProviderName = p?.name || addModelProvider;
     addModelId = "";
@@ -165,6 +177,7 @@
           modelId,
           name: modelId,
           providerId: addModelProvider,
+          groupId: addModelProvider,
           providerName,
           apiKey: addModelApiKey,
           endpoint: addModelEndpoint,
@@ -197,6 +210,7 @@
       modelId: addModelId.trim(),
       name: addModelName.trim() || addModelId.trim(),
       providerId: addModelProvider,
+      groupId: addModelProvider,
       providerName,
       apiKey: addModelApiKey,
       endpoint: addModelEndpoint,
@@ -334,7 +348,7 @@
     pendingEditModels = [...pendingEditModels, {
       modelId,
       name: editManualModelName.trim() || modelId,
-      providerId: editProviderType === "anthropic" ? "anthropic" : editProviderType === "ollama" ? "ollama" : "openai",
+      providerId: editProviderId,
       groupId: editProviderId,
       providerName: editProviderName || editProviderId,
       apiKey: editApiKey,
@@ -360,7 +374,7 @@
         toAdd.push({
           modelId,
           name: (apiModel?.name) || modelId,
-          providerId: editProviderType === "anthropic" ? "anthropic" : editProviderType === "ollama" ? "ollama" : "openai",
+          providerId: editProviderId,
           groupId: editProviderId,
           providerName,
           apiKey: editApiKey,
@@ -480,13 +494,36 @@
     {$t("settings.ai.configHint") || "配置 API Key 添加更多可用模型"}
   </p>
 
+  <!-- Migration hint: fix models grouped under wrong provider -->
+  {#if $customModels.length > 0 && (() => {
+    // Check if any models have providerId that doesn't match their groupId
+    const misgrouped = $customModels.filter(m => m.groupId && m.providerId !== m.groupId && !builtinProviders.some(bp => bp.id === m.providerId));
+    return misgrouped.length > 0;
+  })()}
+    <div class="p-3 rounded-lg text-xs flex items-center gap-2" style="background-color: color-mix(in srgb, var(--warning) 10%, transparent); border: 1px solid var(--warning);">
+      <svg viewBox="0 0 24 24" class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" style="color: var(--warning);"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+      <span style="color: var(--text-secondary);">发现模型分组不正确，点击</span>
+      <button class="underline font-medium" style="color: var(--warning);" onclick={() => {
+        const models = [...$customModels];
+        // Move models from wrong providerId to correct groupId
+        for (const m of models) {
+          if (m.groupId && m.providerId !== m.groupId && !builtinProviders.some(bp => bp.id === m.providerId)) {
+            m.providerId = m.groupId;
+          }
+        }
+        saveCustomModels(models);
+      }}>一键修复</button>
+    </div>
+  {/if}
+
   <div class="rounded-lg border overflow-hidden" style="border-color: var(--border); background-color: var(--bg-secondary);">
     {#each cardIds as pid}
-      {@const customName = $customModels.find(/** @param {any} m */ m => (m.groupId || m.providerId) === pid)?.providerName}
-      {@const bp = builtinProviders.find(p => p.id === pid) || { id: pid, name: customName || pid }}
-      {@const displayName = customName || bp.name}
-      {@const bpModels = $customModels.filter(/** @param {any} m */ m => (m.groupId || m.providerId) === pid)}
-      {@const bpCount = bpModels.length}
+      {@const providerModels = $customModels.filter(/** @param {any} m */ m => (m.groupId || m.providerId) === pid)}
+      {@const customName = providerModels[0]?.providerName}
+      {@const bp = builtinProviders.find(p => p.id === pid) || { id: pid, name: pid }}
+      {@const displayName = customName || bp.name || pid}
+      {@const providerModelList = providerModels}
+      {@const bpCount = providerModelList.length}
       {@const isExpanded = expandedProviderId === pid}
       {#if bpCount > 0}
         <div class="border-b" style="border-color: var(--border);">
@@ -511,7 +548,7 @@
           <!-- Expanded model list -->
           {#if isExpanded}
             <div style="background-color: var(--bg-primary);">
-              {#each bpModels as cm}
+              {#each providerModelList as cm}
                 <div class="flex items-center gap-3 px-4 py-1.5 text-xs border-t" style="border-color: var(--border); color: var(--text-primary);">
                   <span class="flex-1 truncate">{cm.name || cm.modelId}</span>
                   <span class="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded" style="background-color: var(--bg-secondary); color: var(--text-muted);">{formatContextWindow(getModelContextWindow(cm.modelId || cm.id))}</span>
@@ -576,7 +613,7 @@
           <div class="flex-1">
             <label for="add-model-provider" class="block text-xs mb-1.5 font-medium" style="color: var(--text-secondary);">{$t("settings.ai.provider") || "服务商"}</label>
             <select id="add-model-provider" bind:value={addModelProvider} class="w-full px-3 py-2 rounded border text-sm" style="background-color: var(--bg-secondary); color: var(--text-primary); border-color: var(--border);" onchange={onAddProviderChange}>
-              {#each builtinProviders as bp}
+              {#each allProviders as bp}
                 <option value={bp.id}>{bp.name}</option>
               {/each}
             </select>
@@ -1077,6 +1114,7 @@
                   providerModels.push({
                     ...m,
                     id: `${groupId}:${m.modelId || m.id.split(':').pop()}`,
+                    modelId: m.modelId || m.id.split(':').pop(),
                     providerId: backendPid,
                     groupId: groupId,
                     providerName: editProviderName || m.providerName,

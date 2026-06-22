@@ -38,6 +38,14 @@ export function ApplyDiff(arg1) {
   return window['go']['main']['App']['ApplyDiff'](arg1);
 }
 
+export function CanRedoFileChange() {
+  return window['go']['main']['App']['CanRedoFileChange']();
+}
+
+export function CanUndoFileChange() {
+  return window['go']['main']['App']['CanUndoFileChange']();
+}
+
 export function CheckCommandExists(arg1) {
   return window['go']['main']['App']['CheckCommandExists'](arg1);
 }
@@ -542,6 +550,10 @@ export function ReadFileWithLSP(arg1) {
   return window['go']['main']['App']['ReadFileWithLSP'](arg1);
 }
 
+export function RedoFileChange() {
+  return window['go']['main']['App']['RedoFileChange']();
+}
+
 export function RemoveLSPServer(arg1) {
   return window['go']['main']['App']['RemoveLSPServer'](arg1);
 }
@@ -676,6 +688,10 @@ export function TerminalWrite(arg1, arg2) {
 
 export function TestProvider(arg1) {
   return window['go']['main']['App']['TestProvider'](arg1);
+}
+
+export function UndoFileChange() {
+  return window['go']['main']['App']['UndoFileChange']();
 }
 
 export function VerifyFile(arg1) {

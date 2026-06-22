@@ -220,6 +220,15 @@ func runSingleSubAgent(ctx context.Context, task string, extContext string, mode
 	for loop := 0; loop < maxLoops; loop++ {
 		roundCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 
+		// Log progress (sub-agent progress is visible in parent's tool result)
+		if loop > 0 {
+			taskPreview := task
+			if len(taskPreview) > 50 {
+				taskPreview = taskPreview[:50] + "..."
+			}
+			log.Printf("[sub-agent] round %d/%d: %s", loop+1, maxLoops, taskPreview)
+		}
+
 		eventCh, err := SubAgentProviderMgr.ChatStream(roundCtx, currentReq)
 		if err != nil {
 			cancel()
@@ -302,6 +311,21 @@ func runSingleSubAgent(ctx context.Context, task string, extContext string, mode
 			}
 			if tc.Function.Arguments != "" {
 				json.Unmarshal([]byte(tc.Function.Arguments), &call.Args)
+			}
+			// Check approval for dangerous tools in sub-agents
+			needsApproval := tc.Function.Name == "write_file" || tc.Function.Name == "edit_file" ||
+				tc.Function.Name == "execute_command" || tc.Function.Name == "git_commit"
+			if needsApproval && SubAgentToolExec != nil {
+				if !SubAgentToolExec.IsAutoApproved(tc.Function.Name) {
+					// Sub-agent write/exec requires parent approval
+					currentReq.Messages = append(currentReq.Messages, provider.Message{
+						Role:    "tool",
+						Content: fmt.Sprintf("Tool '%s' requires approval. Please ask the user to approve this action.", tc.Function.Name),
+						ToolCallID: tc.ID,
+						Name:    tc.Function.Name,
+					})
+					continue
+				}
 			}
 			if SubAgentToolExec != nil {
 				toolResult, err := SubAgentToolExec.Execute(ctx, call)
