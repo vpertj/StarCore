@@ -94,10 +94,15 @@ export function getCustomModels() {
 }
 
 export function saveCustomModels(newCustomModels) {
-  localStorage.setItem(CUSTOM_MODELS_KEY, JSON.stringify(newCustomModels))
   customModels.set(newCustomModels)
-  // Also persist to Go backend (file-based, survives dev mode restarts)
+  // Persist to Go backend (file-based, unlimited storage)
   SaveCustomModels(newCustomModels).catch(() => {})
+  // Also save to localStorage as fallback (may fail if data > 5MB)
+  try {
+    localStorage.setItem(CUSTOM_MODELS_KEY, JSON.stringify(newCustomModels))
+  } catch (e) {
+    // localStorage quota exceeded — Go backend is the primary store, so this is fine
+  }
 }
 
 export function refreshCustomModels() {
