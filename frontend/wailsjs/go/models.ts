@@ -1367,11 +1367,15 @@ export namespace main {
 	    modelId: string;
 	    name: string;
 	    providerId: string;
+	    groupId: string;
 	    providerName: string;
 	    apiKey: string;
 	    endpoint: string;
 	    enabled: boolean;
 	    maxTokens: number;
+	    supportsThinking?: boolean;
+	    contextWindow?: number;
+	    isCustom?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new CustomModelEntry(source);
@@ -1383,11 +1387,15 @@ export namespace main {
 	        this.modelId = source["modelId"];
 	        this.name = source["name"];
 	        this.providerId = source["providerId"];
+	        this.groupId = source["groupId"];
 	        this.providerName = source["providerName"];
 	        this.apiKey = source["apiKey"];
 	        this.endpoint = source["endpoint"];
 	        this.enabled = source["enabled"];
 	        this.maxTokens = source["maxTokens"];
+	        this.supportsThinking = source["supportsThinking"];
+	        this.contextWindow = source["contextWindow"];
+	        this.isCustom = source["isCustom"];
 	    }
 	}
 	export class PipelineInfo {
