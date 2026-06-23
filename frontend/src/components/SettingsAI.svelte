@@ -75,11 +75,11 @@
   let pendingEditModels = $state(/** @type {Array<any>} */ ([]));
 
   let cardIds = $derived(
-    [...new Set($customModels.map(/** @param {any} m */ m => m.groupId || m.providerId || "unknown"))]
+    [...new Set($customModels.map(/** @param {any} m */ m => m.groupId || m.id.split(':')[0] || m.providerId || "unknown"))]
   );
 
   let editExistingModels = $derived(
-    $customModels.filter((m) => (m.groupId || m.providerId) === editProviderId),
+    $customModels.filter((m) => (m.groupId || m.id.split(':')[0] || m.providerId) === editProviderId),
   );
   /** Combined existing (persisted) + pending (not yet saved) models for dialog display */
   let editAllModels = $derived(
@@ -342,7 +342,7 @@
     if (!editManualModelId.trim()) return;
     const modelId = editManualModelId.trim();
     // Check against already-persisted models (by editProviderId) and pending models
-    const existing = (get(customModels) || []).filter(m => (m.groupId || m.providerId) === editProviderId);
+    const existing = (get(customModels) || []).filter(m => (m.groupId || m.id.split(':')[0] || m.providerId) === editProviderId);
     if (existing.find(m => m.modelId === modelId || m.id.endsWith(":" + modelId))) return;
     if (pendingEditModels.find(m => m.modelId === modelId)) return;
     pendingEditModels = [...pendingEditModels, {
@@ -362,7 +362,7 @@
 
   function editAddSelectedModels() {
     if (editSelectedModelsToAdd.length === 0) return;
-    const existing = (get(customModels) || []).filter(m => (m.groupId || m.providerId) === editProviderId);
+    const existing = (get(customModels) || []).filter(m => (m.groupId || m.id.split(':')[0] || m.providerId) === editProviderId);
     const providerName =
       builtinProviders.find((p) => p.id === editProviderId)?.name ||
       editProviderId;
@@ -518,7 +518,7 @@
 
   <div class="rounded-lg border overflow-hidden" style="border-color: var(--border); background-color: var(--bg-secondary);">
     {#each cardIds as pid}
-      {@const providerModels = $customModels.filter(/** @param {any} m */ m => (m.groupId || m.providerId) === pid)}
+      {@const providerModels = $customModels.filter(/** @param {any} m */ m => (m.groupId || m.id.split(':')[0] || m.providerId) === pid)}
       {@const customName = providerModels[0]?.providerName}
       {@const bp = builtinProviders.find(p => p.id === pid) || { id: pid, name: pid }}
       {@const displayName = customName || bp.name || pid}
@@ -1065,7 +1065,7 @@
           {#if editProviderId.startsWith("custom_")}
             <button class="px-3 py-1.5 rounded text-xs font-medium" style="background-color: #f14c4c; color: #fff;" onclick={() => {
               if (confirm('确定要删除此供应商及其所有模型吗？')) {
-                const models = (get(customModels) || []).filter(m => (m.groupId || m.providerId) !== editProviderId);
+                const models = (get(customModels) || []).filter(m => (m.groupId || m.id.split(':')[0] || m.providerId) !== editProviderId);
                 saveCustomModels(models);
                 showEditProviderDialog = false;
               }
@@ -1111,7 +1111,7 @@
               }
 
               const allModels = [...(get(customModels) || [])];
-              const otherModels = allModels.filter(m => (m.groupId || m.providerId) !== editProviderId);
+              const otherModels = allModels.filter(m => (m.groupId || m.id.split(':')[0] || m.providerId) !== editProviderId);
               const providerModels = [];
 
               for (const m of allModels) {
