@@ -861,7 +861,7 @@
       <div class="flex items-center justify-between mb-4">
         <h3 class="text-base font-medium" style="color: var(--text-primary);">
           {editProviderName || builtinProviders.find((p) => p.id === editProviderId)?.name ||
-            editProviderId}
+            (editProviderId.startsWith("new_") ? "新建模型供应商" : editProviderId)}
         </h3>
         <button
           class="p-1 rounded hover:bg-white/10"
