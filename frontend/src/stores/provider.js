@@ -175,11 +175,10 @@ export async function testProvider(providerId) {
 export async function setProviderConfig(providerId, config) {
   if (window.backend?.SetProviderConfig) {
     await window.backend.SetProviderConfig(providerId, config)
-    try {
-      await loadProviders()
-    } catch (/** @type {any} */ e) {
-      console.error('Failed to reload providers:', e)
-    }
+    // Fire-and-forget: reload provider list in background
+    // Don't await loadProviders() as GetProviders() calls ListModels()
+    // for ALL providers, which can block for a long time
+    loadProviders().catch(() => {})
   }
 }
 /**
