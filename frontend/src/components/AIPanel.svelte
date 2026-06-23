@@ -350,7 +350,9 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
 
   function formatMessage(content) {
     try {
-      const raw = marked.parse(content || '')
+      // Strip text-based tool calls [TOOL: name {args}] from display
+      const cleaned = (content || '').replace(/\[TOOL:\s*\w+\s*\{[^}]*\}\]/g, '').trim()
+      const raw = marked.parse(cleaned)
       return sanitizeMarkdownHtml(raw)
     } catch {
       return escapeHtml(content || '')
