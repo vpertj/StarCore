@@ -34,10 +34,12 @@ func (t *GitCommitTool) Parameters() agent.ToolParameters {
 
 func (t *GitCommitTool) Execute(ctx context.Context, args map[string]any) (string, error) {
 	path, _ := args["path"].(string)
+	path = strings.TrimSpace(path)
 	if path == "" {
 		path = "."
 	}
 	message, ok := args["message"].(string)
+	message = strings.TrimSpace(message)
 	if !ok || message == "" {
 		return "", fmt.Errorf("commit message is required")
 	}
@@ -94,14 +96,17 @@ func (t *GitPullTool) Parameters() agent.ToolParameters {
 
 func (t *GitPullTool) Execute(ctx context.Context, args map[string]any) (string, error) {
 	path, _ := args["path"].(string)
+	path = strings.TrimSpace(path)
 	if path == "" {
 		path = "."
 	}
 	remote, _ := args["remote"].(string)
+	remote = strings.TrimSpace(remote)
 	if remote == "" {
 		remote = defaultRemote
 	}
 	branch, _ := args["branch"].(string)
+	branch = strings.TrimSpace(branch)
 
 	var cmdArgs []string
 	if branch != "" {
@@ -149,14 +154,17 @@ func (t *GitPushTool) Parameters() agent.ToolParameters {
 
 func (t *GitPushTool) Execute(ctx context.Context, args map[string]any) (string, error) {
 	path, _ := args["path"].(string)
+	path = strings.TrimSpace(path)
 	if path == "" {
 		path = "."
 	}
 	remote, _ := args["remote"].(string)
+	remote = strings.TrimSpace(remote)
 	if remote == "" {
 		remote = defaultRemote
 	}
 	branch, _ := args["branch"].(string)
+	branch = strings.TrimSpace(branch)
 
 	cmdArgs := []string{"push"}
 	tags, _ := args["tags"].(bool)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"StarCore/internal/agent"
 )
@@ -51,6 +52,12 @@ func (t *TodoWriteTool) Execute(ctx context.Context, args map[string]any) (strin
 	items, err := parseTodoItems(raw)
 	if err != nil {
 		return "", fmt.Errorf("invalid todos format: %w", err)
+	}
+
+	// Trim whitespace in todo content
+	for i := range items {
+		items[i].Content = strings.TrimSpace(items[i].Content)
+		items[i].ActiveForm = strings.TrimSpace(items[i].ActiveForm)
 	}
 
 	LoopStateRef.SetTodos(items)

@@ -43,10 +43,11 @@ func (t *SearchFilesTool) Execute(ctx context.Context, args map[string]any) (str
 	if !ok || query == "" {
 		return "", fmt.Errorf("search_files requires a 'query' parameter - the text to search for. Example: {\"query\": \"func main\"}")
 	}
+	query = strings.TrimSpace(query)
 
 	rootPath := "."
 	if v, ok := args["path"].(string); ok && v != "" {
-		rootPath = v
+		rootPath = strings.TrimSpace(v)
 	}
 
 	var includePattern string

@@ -47,6 +47,7 @@ var alwaysIgnore = map[string]bool{
 func (t *GlobTool) Execute(ctx context.Context, args map[string]any) (string, error) {
 	_ = ctx
 	pattern, _ := args["pattern"].(string)
+	pattern = strings.TrimSpace(pattern)
 	if pattern == "" {
 		return "", fmt.Errorf("pattern is required")
 	}

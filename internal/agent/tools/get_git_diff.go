@@ -35,12 +35,13 @@ func (t *GetGitDiffTool) Parameters() agent.ToolParameters {
 
 func (t *GetGitDiffTool) Execute(ctx context.Context, args map[string]any) (string, error) {
 	path, _ := args["path"].(string)
+	path = strings.TrimSpace(path)
 	if path == "" {
 		path = "."
 	}
 	action := "status"
 	if v, ok := args["action"].(string); ok && v != "" {
-		action = v
+		action = strings.TrimSpace(v)
 	}
 
 	switch action {

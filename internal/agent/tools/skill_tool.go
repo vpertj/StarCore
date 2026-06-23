@@ -42,6 +42,7 @@ func (t *SkillTool) Execute(ctx context.Context, args map[string]any) (string, e
 	}
 
 	skillID, ok := args["skillId"].(string)
+	skillID = strings.TrimSpace(skillID)
 	if !ok || skillID == "" {
 		return "", fmt.Errorf("skillId is required")
 	}

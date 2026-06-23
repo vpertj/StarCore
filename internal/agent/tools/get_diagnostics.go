@@ -35,6 +35,7 @@ func (t *GetDiagnosticsTool) Parameters() agent.ToolParameters {
 func (t *GetDiagnosticsTool) Execute(ctx context.Context, args map[string]any) (string, error) {
 	_ = ctx
 	projectPath, _ := args["project_path"].(string)
+	projectPath = strings.TrimSpace(projectPath)
 	if projectPath == "" {
 		return "[]", nil
 	}

@@ -44,6 +44,7 @@ func (t *WebFetchTool) Parameters() agent.ToolParameters {
 
 func (t *WebFetchTool) Execute(ctx context.Context, args map[string]any) (string, error) {
 	url, _ := args["url"].(string)
+	url = strings.TrimSpace(url)
 	if url == "" {
 		return "", fmt.Errorf("url is required")
 	}

@@ -105,6 +105,7 @@ func (t *SubAgentTool) Execute(ctx context.Context, args map[string]any) (string
 	}
 
 	task, ok := args["task"].(string)
+	task = strings.TrimSpace(task)
 	if !ok || task == "" {
 		return "", fmt.Errorf("task description is required")
 	}

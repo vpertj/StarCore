@@ -38,6 +38,7 @@ func (t *ListDirectoryTool) Execute(ctx context.Context, args map[string]any) (s
 	if !ok || path == "" {
 		path = "."
 	}
+	path = strings.TrimSpace(path)
 
 	files, err := os.ReadDir(path)
 	if err != nil {

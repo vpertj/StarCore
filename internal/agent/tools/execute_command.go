@@ -49,11 +49,13 @@ func (t *ExecuteCommandTool) Parameters() agent.ToolParameters {
 
 func (t *ExecuteCommandTool) Execute(ctx context.Context, args map[string]any) (string, error) {
 	command, _ := args["command"].(string)
+	command = strings.TrimSpace(command)
 	if command == "" {
 		return "", fmt.Errorf("command is required")
 	}
 
 	cwd, _ := args["cwd"].(string)
+	cwd = strings.TrimSpace(cwd)
 	if cwd == "" {
 		if LoopStateRef != nil {
 			if paths := LoopStateRef.GetFilesTouched(); len(paths) > 0 {

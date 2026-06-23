@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -118,6 +119,7 @@ func (t *AskUserTool) Parameters() agent.ToolParameters {
 
 func (t *AskUserTool) Execute(ctx context.Context, args map[string]any) (string, error) {
 	question, ok := args["question"].(string)
+	question = strings.TrimSpace(question)
 	if !ok || question == "" {
 		return "", fmt.Errorf("question is required")
 	}

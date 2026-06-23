@@ -93,15 +93,21 @@ export function getCustomModels() {
   }
 }
 
-export function saveCustomModels(newCustomModels) {
+export async function saveCustomModels(newCustomModels) {
   customModels.set(newCustomModels)
-  // Persist to Go backend (file-based, unlimited storage)
-  SaveCustomModels(newCustomModels).catch(() => {})
-  // Also save to localStorage as fallback (may fail if data > 5MB)
+  // Persist to Go backend (file-based, unlimited storage) — must succeed
+  try {
+    await SaveCustomModels(newCustomModels)
+  } catch (e) {
+    console.error('Failed to save to Go backend:', e)
+    // Re-throw so callers can handle (e.g. show alert)
+    throw e
+  }
+  // Also save to localStorage as fallback (best-effort, may fail if data > 5MB)
   try {
     localStorage.setItem(CUSTOM_MODELS_KEY, JSON.stringify(newCustomModels))
-  } catch (e) {
-    // localStorage quota exceeded — Go backend is the primary store, so this is fine
+  } catch {
+    // localStorage quota exceeded — acceptable, Go backend is primary
   }
 }
 

@@ -38,6 +38,7 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) (strin
 	if !ok {
 		return "", fmt.Errorf("path is required")
 	}
+	path = strings.TrimSpace(path)
 	content, ok := args["content"].(string)
 	if !ok {
 		return "", fmt.Errorf("content is required")

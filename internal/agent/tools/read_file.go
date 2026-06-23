@@ -65,6 +65,8 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]any) (string
 		return "", fmt.Errorf("No file path specified. Files in project:\n%s\nPlease specify one.", list)
 	}
 
+	path = strings.TrimSpace(path)
+
 	if SandboxConfig != nil {
 		if err := SandboxConfig.ValidatePath(path); err != nil {
 			return "", fmt.Errorf("path validation failed: %w", err)

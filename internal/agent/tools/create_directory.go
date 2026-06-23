@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"StarCore/internal/agent"
 )
@@ -36,6 +37,7 @@ func (t *CreateDirectoryTool) Execute(ctx context.Context, args map[string]any) 
 	if !ok || path == "" {
 		return "", fmt.Errorf("path is required")
 	}
+	path = strings.TrimSpace(path)
 
 	if SandboxConfig != nil {
 		if err := SandboxConfig.ValidatePath(path); err != nil {

@@ -45,6 +45,7 @@ func (t *HTTPRequestTool) Parameters() agent.ToolParameters {
 
 func (t *HTTPRequestTool) Execute(ctx context.Context, args map[string]any) (string, error) {
 	url, _ := args["url"].(string)
+	url = strings.TrimSpace(url)
 	if url == "" {
 		return "", fmt.Errorf("url is required")
 	}

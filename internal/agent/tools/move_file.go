@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"StarCore/internal/agent"
 )
@@ -35,7 +36,9 @@ func (t *MoveFileTool) Parameters() agent.ToolParameters {
 func (t *MoveFileTool) Execute(ctx context.Context, args map[string]any) (string, error) {
 	_ = ctx
 	source, _ := args["source"].(string)
+	source = strings.TrimSpace(source)
 	dest, _ := args["dest"].(string)
+	dest = strings.TrimSpace(dest)
 
 	if source == "" {
 		return "", fmt.Errorf("source is required")

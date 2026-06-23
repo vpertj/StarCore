@@ -186,7 +186,7 @@
         });
       }
     }
-    saveCustomModels(models);
+    saveCustomModels(models).catch(e => console.error('save failed:', e));
     if (addModelApiKey || addModelEndpoint) {
       setProviderConfig(addModelProvider, {
         apiKey: addModelApiKey,
@@ -217,7 +217,7 @@
       enabled: true,
       isCustom: true,
     });
-    saveCustomModels(models);
+    saveCustomModels(models).catch(e => console.error('save failed:', e));
     if (addModelApiKey || addModelEndpoint) {
       setProviderConfig(addModelProvider, {
         apiKey: addModelApiKey,
@@ -234,7 +234,7 @@
         /** @param {any} m */ (m) => m.id !== modelId,
       )
     );
-    saveCustomModels(models);
+    saveCustomModels(models).catch(e => console.error('save failed:', e));
   }
 
   /** @param {string} modelId */
@@ -243,7 +243,7 @@
     const model = models.find(/** @param {any} m */ (m) => m.id === modelId);
     if (model) {
       model.enabled = !model.enabled;
-      saveCustomModels(models);
+      saveCustomModels(models).catch(e => console.error('save failed:', e));
     }
   }
 
@@ -428,7 +428,7 @@
       apiKey: editCustomModelApiKey,
       endpoint: editCustomModelEndpoint,
     };
-    saveCustomModels(currentCustomModels);
+    saveCustomModels(currentCustomModels).catch(e => console.error('save failed:', e));
     showEditCustomModelDialog = false;
   }
 
@@ -1066,7 +1066,7 @@
             <button class="px-3 py-1.5 rounded text-xs font-medium" style="background-color: #f14c4c; color: #fff;" onclick={() => {
               if (confirm('确定要删除此供应商及其所有模型吗？')) {
                 const models = (get(customModels) || []).filter(m => (m.groupId || m.id.split(':')[0] || m.providerId) !== editProviderId);
-                saveCustomModels(models);
+        saveCustomModels(models).catch(e => console.error('save failed:', e));
                 showEditProviderDialog = false;
               }
             }}>删除供应商</button>
@@ -1164,9 +1164,13 @@
                 });
               }
 
-              saveCustomModels([...otherModels, ...providerModels]);
-              pendingEditModels = [];
-              showEditProviderDialog = false;
+              try {
+                await saveCustomModels([...otherModels, ...providerModels]);
+                pendingEditModels = [];
+                showEditProviderDialog = false;
+              } catch (e) {
+                alert('保存模型失败: ' + (e.message || e));
+              }
             }}>{$t("settings.save")}</button
           >
         </div>
