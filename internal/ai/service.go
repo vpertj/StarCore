@@ -802,6 +802,16 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 		warningAt = 1
 	}
 
+	// Set original goal for anti-drift tracking
+	if len(req.Messages) > 0 {
+		for i := len(req.Messages) - 1; i >= 0; i-- {
+			if req.Messages[i].Role == "user" {
+				s.loopState.SetOriginalGoal(req.Messages[i].Content)
+				break
+			}
+		}
+	}
+
 	for loop := 0; loop < maxLoops; loop++ {
 		select {
 		case <-ctx.Done():
@@ -823,6 +833,27 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 			currentReq.Messages = append(currentReq.Messages, provider.Message{
 				Role: "system", Content: stateSummary,
 			})
+		}
+
+		// Anti-drift: re-inject original goal every 10 rounds or when stagnating
+		if loop > 0 && loop%10 == 0 {
+			if reminder := s.loopState.AntiDriftReminder(); reminder != "" {
+				currentReq.Messages = append(currentReq.Messages, provider.Message{
+					Role: "system", Content: reminder,
+				})
+			}
+		}
+		if s.loopState.IsStagnant(5) {
+			if reminder := s.loopState.AntiDriftReminder(); reminder != "" {
+				currentReq.Messages = append(currentReq.Messages, provider.Message{
+					Role: "system", Content: reminder,
+				})
+			}
+		}
+
+		// Context pruning: if messages exceed threshold, keep system + last N messages
+		if len(currentReq.Messages) > 80 {
+			currentReq.Messages = pruneMessages(currentReq.Messages, 60)
 		}
 
 		roundCtx, roundCancel := context.WithTimeout(ctx, 300*time.Second)
@@ -1063,13 +1094,25 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 					for _, t := range currentReq.Tools {
 						toolNames = append(toolNames, t.Function.Name)
 					}
+
+					// Build adaptive nudge based on what's been tried
+					nudgeContent := fmt.Sprintf("你的回复中没有调用工具。")
+					if s.loopState.GetOriginalGoal() != "" {
+						nudgeContent += fmt.Sprintf("原始目标: %s\n", s.loopState.GetOriginalGoal())
+					}
+					if files := s.loopState.GetFilesTouched(); len(files) > 0 {
+						nudgeContent += fmt.Sprintf("已修改 %d 个文件: %s\n", len(files), strings.Join(files, ", "))
+					}
+					nudgeContent += fmt.Sprintf("可用工具: %s\n", strings.Join(toolNames, ", "))
+					nudgeContent += "如果任务尚未完成，请直接调用工具继续执行。如果任务已完成，请在回复中明确说明「任务已完成」。"
+
 					currentReq.Messages = append(currentReq.Messages, provider.Message{
 						Role:    "assistant",
 						Content: assistantContent,
 					})
 					currentReq.Messages = append(currentReq.Messages, provider.Message{
 						Role:    "user",
-						Content: fmt.Sprintf("你的回复中没有调用工具。如果任务尚未完成，请直接调用工具继续执行（可用工具: %s）。如果任务已完成，请在回复中明确说明「任务已完成」。", strings.Join(toolNames, ", ")),
+						Content: nudgeContent,
 					})
 					s.emitFn("ai:stream:data", "\n\n*[系统: 等待工具调用...]*")
 					continue
@@ -1120,6 +1163,11 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 		}
 
 		agentTools.SetSubAgentProviderID(currentReq.ProviderID)
+
+		// Record tool calls for repetition detection
+		for _, call := range calls {
+			s.loopState.RecordToolCall(call.Name, call.Args, loop+1)
+		}
 
 		if len(calls) > 0 {
 			type toolRes struct {
@@ -1241,6 +1289,26 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 					Content: fmt.Sprintf("[自动验证结果]\n%s\n如果验证失败，请分析错误原因并修复代码。", verifySummary),
 				})
 			}
+		}
+
+		// Record round for stagnation tracking
+		s.loopState.RecordRound(len(toolCalls), len(modifiedFiles))
+
+		// Semantic repetition detection: if agent is repeating the same approach
+		if len(toolCalls) > 0 && s.loopState.CheckSemanticRepetition(3) {
+			currentReq.Messages = append(currentReq.Messages, provider.Message{
+				Role:    "system",
+				Content: "你似乎在重复相同的操作但没有取得进展。请回顾原始目标，尝试完全不同的方法：换一个文件、换一种搜索策略、或者先停下来分析为什么当前方法无效。",
+			})
+		}
+
+		// Stagnation alert: no progress for 5+ rounds
+		if s.loopState.IsStagnant(5) {
+			s.emitFn("ai:stream:data", "\n\n*[系统: 已连续5轮无实质进展，请调整策略]*")
+			currentReq.Messages = append(currentReq.Messages, provider.Message{
+				Role:    "system",
+				Content: "⚠️ 已连续5轮无实质进展（无工具调用或文件修改）。请：1) 回顾原始目标；2) 分析当前卡在哪里；3) 尝试完全不同的方法；4) 如果无法继续，总结已完成的工作并结束。",
+			})
 		}
 
 		if assistantContent == "" && len(toolCalls) > 0 {
@@ -1537,4 +1605,43 @@ func (p *AgentProgress) shouldStop(nudgeCount int) bool {
 func (p *AgentProgress) getProgressSummary() string {
 	return fmt.Sprintf("files=%d, toolCalls=%d, success=%d, empty=%d",
 		p.fileCount(), p.toolCallCount, p.successfulCalls, p.consecutiveEmpty)
+}
+
+// pruneMessages keeps system messages + the most recent messages to prevent context overflow.
+// System messages (role=system) are always preserved. Recent messages are kept to maintain continuity.
+func pruneMessages(msgs []provider.Message, keepRecent int) []provider.Message {
+	if len(msgs) <= keepRecent {
+		return msgs
+	}
+
+	var systemMsgs []provider.Message
+	var otherMsgs []provider.Message
+
+	for _, m := range msgs {
+		if m.Role == "system" {
+			systemMsgs = append(systemMsgs, m)
+		} else {
+			otherMsgs = append(otherMsgs, m)
+		}
+	}
+
+	// Keep recent non-system messages
+	if len(otherMsgs) > keepRecent {
+		otherMsgs = otherMsgs[len(otherMsgs)-keepRecent:]
+	}
+
+	// Reconstruct: system messages first, then recent messages
+	result := make([]provider.Message, 0, len(systemMsgs)+len(otherMsgs)+1)
+	result = append(result, systemMsgs...)
+
+	// Add a summary marker if we pruned messages
+	if len(msgs) > keepRecent+len(systemMsgs) {
+		result = append(result, provider.Message{
+			Role:    "system",
+			Content: fmt.Sprintf("[上下文已压缩：保留了最近 %d 条消息和所有系统消息]", keepRecent),
+		})
+	}
+
+	result = append(result, otherMsgs...)
+	return result
 }
