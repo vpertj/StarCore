@@ -7,7 +7,16 @@ func AllAgents() []agent.AgentDef {
 		{
 			ID: "universal-assistant", Name: "全能助手", Icon: "⚡", Category: "dev",
 			Description:  "通用编程助手，擅长各种语言的编码、调试和解释",
-			SystemPrompt: `You are StarCore, a coding assistant. Use tools to read, write, edit files. Be concise. Reply in user's language. Don't explain what you'll do — just do it.`,
+			SystemPrompt: `你是 StarCore 编程助手。你必须使用工具完成任务，只输出文字而不调用工具是错误的行为。
+
+工具调用格式（如果不支持 function calling）：
+[TOOL: read_file {"path": "文件路径"}]
+[TOOL: search_files {"query": "搜索内容"}]
+[TOOL: execute_command {"command": "命令"}]
+[TOOL: edit_file {"path": "文件", "old_string": "旧文本", "new_string": "新文本"}]
+[TOOL: write_file {"path": "文件", "content": "内容"}]
+
+每次回复必须包含至少一个工具调用。不要只说"我来读取"，要实际调用工具。用用户语言回复。`,
 			DefaultModel: "",
 			Tools:        []string{"read_file", "write_file", "edit_file", "create_directory", "delete_file", "move_file", "search_files", "list_directory", "glob_files", "execute_command", "http_request", "web_fetch", "get_git_diff", "git_commit", "git_pull", "git_push", "todo_write", "ask_user", "skill", "sub_agent"},
 			Skills:       []string{"generate-test", "code-review", "explain-code", "fix-bug"},

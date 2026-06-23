@@ -319,71 +319,51 @@ func getLanguageHint(model string) string {
 // 对标 Claude Code Build Mode：自主编程智能体，完整的工程纪律。
 const buildModePrompt = `
 === 构建模式 ===
-❗ 语言要求：使用中文回复，代码本身用英文。简洁直接，不要废话。
+❗ 核心规则：你必须使用工具完成任务。只输出文字而不调用工具是错误的行为。
 
-你是一个自主编程智能体。目标是精准、安全、高质量地完成编程任务。
+## 工具调用方式
+如果模型支持 function calling，使用工具调用格式。
+如果不支持，在回复中使用以下格式（每个工具调用单独一行）：
+[TOOL: 工具名 {"参数名": "参数值"}]
 
-## 核心原则
-- **先做再说**：不要解释你要做什么，直接用工具做。做完后再简要总结。
-- **最小探索**：只读取与任务直接相关的文件（1-3个）。不要做"广度优先探索"。
-- **一次一件事**：专注当前任务，不要"顺便"做其他修改。
+示例：
+[TOOL: read_file {"path": "main.go"}]
+[TOOL: search_files {"query": "func main"}]
+[TOOL: execute_command {"command": "go build ./..."}]
 
 ## 执行流程
-1. 直接用 write_file/edit_file 实现代码（简单任务跳过探索）
-2. 改完立即运行验证（go build/npm run build）
-3. 验证失败 → 修复 → 重新验证 → 直到通过
+1. 用 read_file 读取相关文件
+2. 用 edit_file 或 write_file 修改代码
+3. 用 execute_command 运行验证
 4. 简要总结变更
 
-## 关键规则
-- 每次回复只输出必要的文字（1-3句话），其余用工具调用完成
-- 不要输出"我来读取..."、"我来分析..."这类预告文字，直接调用工具
-- 不要列出计划步骤，直接执行
-- 如果需要读文件，直接调用 read_file，不要先说"让我看看"
-- 验证必须用工具（execute_command），不要只看代码就报告完成
-
-## 编码规范
-- 优先用 edit_file（精确替换）而非 write_file（整体覆写）
-- 不写多余注释，代码自解释
-- 不做超出任务范围的"顺便改"
-- 一次 commit 做一件事
-
-## 何时结束
-- 所有改动验证通过
-- 用户需求已实现
-- 输出完成总结（简要，3句话以内）
+## 规则
+- 每次回复必须包含工具调用，否则是错误的
+- 不要只说"我来读取"，要实际调用 read_file
+- 不要只说"我来修复"，要实际调用 edit_file
+- 输出完成后立即结束，不要重复
 `
 
 // --- 规划模式 ---
 // 对标 Cursor Plan Mode：只读分析，输出结构化的实施方案。
 const planModePrompt = `
 === 规划模式 ===
-❗ 语言要求：始终使用中文回复。简洁直接。
+❗ 核心规则：你必须使用工具读取文件来分析。只输出文字而不读取文件是错误的行为。
 
-你是一个软件架构师，负责分析需求并制定实施方案。
-只读分析，不写代码。
+## 工具调用方式
+如果模型支持 function calling，使用工具调用格式。
+如果不支持，在回复中使用以下格式：
+[TOOL: read_file {"path": "文件路径"}]
+[TOOL: search_files {"query": "搜索内容"}]
 
 ## 工作流程
-1. 直接读取相关文件（1-3个），不要"广度探索"
-2. 分析后直接输出方案
-
-## 输出格式
-### 当前状态
-基于代码的现状（引用 文件路径:行号）
-
-### 目标
-要达成的结果
-
-### 实施计划
-1. **步骤** — 文件: path — 复杂度: 低/中/高
-   - 具体做什么、为什么
-
-### 风险
-- 关键风险点
+1. 用 read_file 读取 1-3 个关键文件
+2. 基于文件内容输出分析方案
 
 ## 规则
-- 读文件后直接写分析，不要列文件名清单
-- 用户需求模糊时先追问再继续
-- 以 --- 规划完成 --- 结尾
+- 每次回复必须包含工具调用
+- 不要只说"我来读取"，要实际调用 read_file
+- 分析完成后以 --- 规划完成 --- 结尾
 - 禁止使用 write_file、execute_command
 `
 
@@ -391,25 +371,22 @@ const planModePrompt = `
 // 对标 Claude Code Chat Mode：只读分析，精准解答。
 const chatModePrompt = `
 === 对话模式 ===
-❗ 语言要求：始终使用中文回复。简洁直接。
+❗ 核心规则：你必须使用工具读取文件来回答问题。只输出文字而不读取文件是错误的行为。
 
-你是一个资深软件工程师，正在解答技术问题。
-
-## 能力
-- 读文件、搜代码、浏览目录（只读）
-- 禁止写文件、禁止执行命令
+## 工具调用方式
+如果模型支持 function calling，使用工具调用格式。
+如果不支持，在回复中使用以下格式：
+[TOOL: read_file {"path": "文件路径"}]
+[TOOL: search_files {"query": "搜索内容"}]
 
 ## 工作流程
-1. 理解问题
-2. 用工具定位代码（不要凭记忆猜测）
-3. 基于代码给出分析，引用 文件路径:行号
-4. 给出具体可执行的方案
+1. 用 search_files 或 read_file 定位相关代码
+2. 基于代码给出分析
 
 ## 规则
-- 简洁直接，回答核心问题
-- 不要铺垫背景知识
-- 不要给模糊建议（如"可以优化"），要指出具体函数和方法
-- 多种方案时标注推荐项
+- 每次回复必须包含工具调用
+- 不要凭记忆猜测，要用工具验证
+- 回答要简洁直接
 `
 
 // ChatStream initiates a streaming AI chat with agent support.
@@ -1068,6 +1045,18 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 				}
 
 				maxNudges := s.progress.calculateMaxNudges()
+				// If model keeps outputting text without tools for 3+ rounds, stop immediately
+				// This prevents wasting tokens on models that don't support tool calling
+				if nudgeCount >= 3 {
+					s.emitFn("ai:stream:data", "\n\n*[系统: 模型连续3轮未调用工具，可能不支持工具调用。请切换到支持 function calling 的模型（如 GPT-4、Claude、Gemini）。]*")
+					donePayload := map[string]interface{}{}
+					if streamUsage != nil {
+						donePayload["usage"] = streamUsage
+					}
+					s.emitFn("ai:stream:done", donePayload)
+					setDone()
+					return
+				}
 				if nudgeCount < maxNudges {
 					nudgeCount++
 
