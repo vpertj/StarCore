@@ -1054,21 +1054,19 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 				maxNudges := s.progress.calculateMaxNudges()
 				if nudgeCount < maxNudges {
 					nudgeCount++
-					toolNames := make([]string, 0, len(currentReq.Tools))
-					for _, t := range currentReq.Tools {
-						toolNames = append(toolNames, t.Function.Name)
-					}
+
+					// Build tool usage hint for models that don't generate tool_calls
+					toolHint := buildToolUsageHint(currentReq.Tools, assistantContent)
 
 					// Build adaptive nudge based on what's been tried
-					nudgeContent := fmt.Sprintf("你的回复中没有调用工具。")
+					nudgeContent := fmt.Sprintf("你的回复中没有调用工具。你必须使用工具来完成任务，而不是只输出文字。")
 					if s.loopState.GetOriginalGoal() != "" {
-						nudgeContent += fmt.Sprintf("原始目标: %s\n", s.loopState.GetOriginalGoal())
+						nudgeContent += fmt.Sprintf("\n原始目标: %s\n", s.loopState.GetOriginalGoal())
 					}
 					if files := s.loopState.GetFilesTouched(); len(files) > 0 {
 						nudgeContent += fmt.Sprintf("已修改 %d 个文件: %s\n", len(files), strings.Join(files, ", "))
 					}
-					nudgeContent += fmt.Sprintf("可用工具: %s\n", strings.Join(toolNames, ", "))
-					nudgeContent += "如果任务尚未完成，请直接调用工具继续执行。如果任务已完成，请在回复中明确说明「任务已完成」。"
+					nudgeContent += toolHint
 
 					currentReq.Messages = append(currentReq.Messages, provider.Message{
 						Role:    "assistant",
@@ -1608,4 +1606,34 @@ func pruneMessages(msgs []provider.Message, keepRecent int) []provider.Message {
 
 	result = append(result, otherMsgs...)
 	return result
+}
+
+// buildToolUsageHint generates explicit tool calling instructions for models
+// that don't properly support the OpenAI function calling format.
+func buildToolUsageHint(tools []provider.ToolDefinition, lastContent string) string {
+	if len(tools) == 0 {
+		return ""
+	}
+
+	var hint strings.Builder
+	hint.WriteString("\n## 工具调用格式（必须遵守）\n")
+	hint.WriteString("你必须使用以下工具来完成任务。不要只输出文字描述，要实际调用工具。\n\n")
+
+	for _, t := range tools {
+		hint.WriteString(fmt.Sprintf("### %s\n%s\n", t.Function.Name, t.Function.Description))
+		// Show required parameters
+		if params, ok := t.Function.Parameters.(agent.ToolParameters); ok {
+			if len(params.Required) > 0 {
+				hint.WriteString(fmt.Sprintf("必需参数: %s\n", strings.Join(params.Required, ", ")))
+			}
+		}
+		hint.WriteString("\n")
+	}
+
+	hint.WriteString("## 调用示例\n")
+	hint.WriteString("要读取文件，请直接调用 read_file 工具，参数为 {\"path\": \"文件路径\"}。\n")
+	hint.WriteString("要搜索代码，请直接调用 search_files 工具，参数为 {\"query\": \"搜索内容\"}。\n")
+	hint.WriteString("不要在文字中描述你要做什么，直接调用工具执行。\n")
+
+	return hint.String()
 }
