@@ -1026,43 +1026,16 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 					return
 				}
 
-			// If no tool calls were made, nudge the AI to continue
+			// If no tool calls were made, check if AI declared task done or nudge it
 			if !toolCallsSeen && assistantContent != "" {
 				s.progress.recordEmptyRound()
-				maxNudges := s.progress.calculateMaxNudges()
-				if nudgeCount < maxNudges {
-						nudgeCount++
-						toolNames := make([]string, 0, len(currentReq.Tools))
-						for _, t := range currentReq.Tools {
-							toolNames = append(toolNames, t.Function.Name)
-						}
-						currentReq.Messages = append(currentReq.Messages, provider.Message{
-							Role:    "assistant",
-							Content: assistantContent,
-						})
-						currentReq.Messages = append(currentReq.Messages, provider.Message{
-							Role:    "user",
-							Content: fmt.Sprintf("你的回复中没有调用工具。如果任务尚未完成，请直接调用工具继续执行（可用工具: %s）。如果任务已完成，请在回复中明确说明「任务已完成」。", strings.Join(toolNames, ", ")),
-						})
-						s.emitFn("ai:stream:data", "\n\n*[系统: 等待工具调用...]*")
-						continue
-					}
-					// Nudge exhausted — check if AI explicitly said it's done
-					lowerContent := strings.ToLower(assistantContent)
-					explicitDone := strings.Contains(lowerContent, "任务已完成") ||
-						strings.Contains(lowerContent, "all tasks completed") ||
-						strings.Contains(lowerContent, "所有任务已完成")
-					if explicitDone {
-						donePayload := map[string]interface{}{}
-						if streamUsage != nil {
-							donePayload["usage"] = streamUsage
-						}
-						s.emitFn("ai:stream:done", donePayload)
-						doneEmitted = true
-						return
-					}
-					// Still not done but nudged out — emit done with warning
-					s.emitFn("ai:stream:data", "\n\n*[系统: 已达到最大提示次数，请手动发送「继续」以继续执行]*")
+
+				// Check if AI explicitly declared task completion — stop immediately
+				lowerContent := strings.ToLower(assistantContent)
+				explicitDone := strings.Contains(lowerContent, "任务已完成") ||
+					strings.Contains(lowerContent, "all tasks completed") ||
+					strings.Contains(lowerContent, "所有任务已完成")
+				if explicitDone {
 					donePayload := map[string]interface{}{}
 					if streamUsage != nil {
 						donePayload["usage"] = streamUsage
@@ -1071,7 +1044,34 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 					doneEmitted = true
 					return
 				}
-				// If tool calls were seen, the loop continues naturally
+
+				maxNudges := s.progress.calculateMaxNudges()
+				if nudgeCount < maxNudges {
+					nudgeCount++
+					toolNames := make([]string, 0, len(currentReq.Tools))
+					for _, t := range currentReq.Tools {
+						toolNames = append(toolNames, t.Function.Name)
+					}
+					currentReq.Messages = append(currentReq.Messages, provider.Message{
+						Role:    "assistant",
+						Content: assistantContent,
+					})
+					currentReq.Messages = append(currentReq.Messages, provider.Message{
+						Role:    "user",
+						Content: fmt.Sprintf("你的回复中没有调用工具。如果任务尚未完成，请直接调用工具继续执行（可用工具: %s）。如果任务已完成，请在回复中明确说明「任务已完成」。", strings.Join(toolNames, ", ")),
+					})
+					s.emitFn("ai:stream:data", "\n\n*[系统: 等待工具调用...]*")
+					continue
+				}
+				// Nudge exhausted — emit done with warning
+				s.emitFn("ai:stream:data", "\n\n*[系统: 已达到最大提示次数，请手动发送「继续」以继续执行]*")
+				donePayload := map[string]interface{}{}
+				if streamUsage != nil {
+					donePayload["usage"] = streamUsage
+				}
+				s.emitFn("ai:stream:done", donePayload)
+				doneEmitted = true
+				return
 			}
 
 			donePayload := map[string]interface{}{}
@@ -1225,13 +1225,6 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 			currentReq.Messages = append(currentReq.Messages, provider.Message{
 				Role:    "system",
 				Content: "你似乎陷入了重复模式。请回顾你的目标，尝试不同的方式：读取其他文件、换一个搜索策略、或者先分析当前进展再决定下一步。",
-			})
-		}
-
-		if len(toolCalls) > 0 && assistantContent == "" && s.isRepeatedLoop(toolCalls) {
-			currentReq.Messages = append(currentReq.Messages, provider.Message{
-				Role:    "system",
-				Content: "ä½ ä¼¼ä¹Žé™·å…¥äº†é‡å¤æ¨¡å¼ã€‚è¯·å›žé¡¾ä½ çš„ç›®æ ‡ï¼Œå°è¯•ä¸åŒçš„æ–¹å¼ï¼šè¯»å–å…¶ä»–æ–‡ä»¶ã€æ¢ä¸€ä¸ªæœç´¢ç–¥ç•¥ã€æˆ–è€…å…ˆåˆ†æžå½“å‰è¿›å±•å†å†³å®šä¸‹ä¸€æ¥ã€‚",
 			})
 		}
 
