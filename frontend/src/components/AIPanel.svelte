@@ -13,7 +13,7 @@
   import { activeProviderId, activeModelId, allAvailableModels, builtinProviders, loadModels } from '../stores/provider.js'
    import { activeAgentId, agents, loadAgents } from '../stores/agent.js'
    import { activeConversationId } from '../stores/memory.js'
-  import { aiMode } from '../stores/ai.js'
+  import { aiMode, aiModeManuallySet } from '../stores/ai.js'
   import { Marked } from 'marked'
   import { sanitizeMarkdownHtml } from '../lib/sanitize.js'
   import hljs from 'highlight.js'
@@ -105,7 +105,7 @@ function selectAgent(agent) { activeAgentId.set(agent.id); showAgentDropdown = f
 /** @param {{id: string, providerId?: string, groupId?: string}} model */
 function selectModel(model) { activeModelId.set(model.id); const gid = model.groupId || model.providerId; if (gid && gid !== $activeProviderId) { activeProviderId.set(gid); loadModels() } showModelDropdown = false }
 /** @param {string} mode */
-function setMode(mode) { aiMode.set(mode); showModeDropdown = false }
+function setMode(mode) { aiMode.set(mode); aiModeManuallySet.set(true); showModeDropdown = false }
 /** @param {MouseEvent} e */
 function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.target); if (target && !target.closest('.dropdown-trigger')) { showAgentDropdown = false; showModelDropdown = false; showModeDropdown = false } }
 

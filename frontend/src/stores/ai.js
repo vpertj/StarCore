@@ -45,6 +45,7 @@ export const contextFiles = writable(/** @type {string[]} */ ([]))
 export const activeFileContent = writable('')
 export const selectedCode = writable('')
 export const aiMode = writable('chat')
+export const aiModeManuallySet = writable(false)
 export const detectedMode = writable('chat')
 export const connectionStatus = writable(/** @type {'ok'|'warning'|'error'} */ ('ok'))
 export const toolCalls = writable(/** @type {{id: string, name: string, args: any, status: string, result?: string, error?: string, fileMeta?: {operation: string, filePath: string, startLine?: number, endLine?: number, summary?: string}}[]} */ ([]))
@@ -362,11 +363,16 @@ export async function sendMessage(content, attachedFiles) {
   const detected = detectMode(content)
   if (get(masterMode)) {
     // Master: auto-detect; if uncertain, default to build
-    if (detected !== 'chat' || get(aiMode) === 'plan') {
-      aiMode.set(detected === 'chat' ? 'build' : detected)
-    } else if (get(aiMode) !== 'build' && get(aiMode) !== 'plan') {
-      aiMode.set('build')
+    // But respect user's manual mode selection for this message
+    if (!get(aiModeManuallySet)) {
+      if (detected !== 'chat') {
+        aiMode.set(detected)
+      } else if (get(aiMode) !== 'build' && get(aiMode) !== 'plan') {
+        aiMode.set('build')
+      }
     }
+    // Reset manual flag after using it
+    aiModeManuallySet.set(false)
   } else {
     // Non-Master: default to chat, but allow build/plan for coding intents
     if (detected === 'build' || detected === 'plan') {
