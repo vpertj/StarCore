@@ -1103,8 +1103,8 @@
               try {
                 await setProviderConfig(groupId, {
                   name: editProviderName || editProviderId,
-                  apiKey: editApiKey,
-                  endpoint: editEndpoint,
+                  apiKey: editApiKey.trim(),
+                  endpoint: editEndpoint.trim(),
                   enabled: true,
                 });
               } catch (e) {

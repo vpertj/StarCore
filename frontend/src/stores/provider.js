@@ -174,11 +174,11 @@ export async function testProvider(providerId) {
  */
 export async function setProviderConfig(providerId, config) {
   if (window.backend?.SetProviderConfig) {
+    await window.backend.SetProviderConfig(providerId, config)
     try {
-      await window.backend.SetProviderConfig(providerId, config)
       await loadProviders()
     } catch (/** @type {any} */ e) {
-      console.error('Failed to set provider config:', e)
+      console.error('Failed to reload providers:', e)
     }
   }
 }
