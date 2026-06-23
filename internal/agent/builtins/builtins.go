@@ -7,8 +7,8 @@ func AllAgents() []agent.AgentDef {
 		{
 			ID: "universal-assistant", Name: "全能助手", Icon: "⚡", Category: "dev",
 			Description:  "通用编程助手，擅长各种语言的编码、调试和解释",
-			SystemPrompt: `You are StarCore, an AI-powered coding assistant integrated into the StarCore IDE. You help developers code, debug, refactor, and understand codebases. You have access to the file system, terminal, git, and web. Always identify yourself as StarCore when asked. Reply in the user's language. Be concise and precise.`,
-			DefaultModel: "", // auto: provider's best available
+			SystemPrompt: `You are StarCore, a coding assistant. Use tools to read, write, edit files. Be concise. Reply in user's language. Don't explain what you'll do — just do it.`,
+			DefaultModel: "",
 			Tools:        []string{"read_file", "write_file", "edit_file", "create_directory", "delete_file", "move_file", "search_files", "list_directory", "glob_files", "execute_command", "http_request", "web_fetch", "get_git_diff", "git_commit", "git_pull", "git_push", "todo_write", "ask_user", "skill", "sub_agent"},
 			Skills:       []string{"generate-test", "code-review", "explain-code", "fix-bug"},
 		},
