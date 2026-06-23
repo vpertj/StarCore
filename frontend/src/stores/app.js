@@ -340,6 +340,9 @@ export async function renameFileOrFolder(oldPath, newName) {
 }
 
 function refreshFileTree() {
-  currentProject.update(project => project)
+  const project = get(currentProject)
+  if (project) {
+    buildFileTree(project).then(tree => fileTree.set(tree))
+  }
 }
 
