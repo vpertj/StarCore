@@ -26,7 +26,7 @@ func (t *GitCommitTool) Parameters() agent.ToolParameters {
 		Properties: map[string]agent.ToolParamProp{
 			"path":    {Type: "string", Description: "Repository path (default: current directory)"},
 			"message": {Type: "string", Description: "Commit message (conventional commits format preferred)"},
-			"files":   {Type: "string", Description: "Specific files to stage (space-separated, default: all)"},
+			"files":   {Type: "string", Description: "Specific files to stage (space-separated, default: all tracked+new). Use 'git add' syntax."},
 		},
 		Required: []string{"message"},
 	}

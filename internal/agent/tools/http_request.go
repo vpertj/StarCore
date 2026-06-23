@@ -3,6 +3,7 @@ package tools
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -73,19 +74,25 @@ func (t *HTTPRequestTool) Execute(ctx context.Context, args map[string]any) (str
 	httpReq.Header.Set("Accept", "*/*")
 
 	if headers, ok := args["headers"].(string); ok && headers != "" {
-		for _, line := range strings.Split(headers, "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
+		headers = strings.TrimSpace(headers)
+		if strings.HasPrefix(headers, "{") {
+			var headerMap map[string]string
+			if json.Unmarshal([]byte(headers), &headerMap) == nil {
+				for k, v := range headerMap {
+					httpReq.Header.Set(k, v)
+				}
 			}
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				httpReq.Header.Set(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+		} else {
+			for _, line := range strings.Split(headers, "\n") {
+				line = strings.TrimSpace(line)
+				if line == "" {
+					continue
+				}
+				parts := strings.SplitN(line, ":", 2)
+				if len(parts) == 2 {
+					httpReq.Header.Set(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+				}
 			}
-		}
-		// Also try parsing as JSON
-		if !strings.Contains(headers, ":") {
-			// Simple key-value format parsing omitted for now
 		}
 	}
 

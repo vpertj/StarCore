@@ -63,6 +63,15 @@ func (s *LoopState) AddFileTouched(path string) {
 	s.FilesTouched = append(s.FilesTouched, path)
 }
 
+// GetFilesTouched returns a copy of the touched files list.
+func (s *LoopState) GetFilesTouched() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, len(s.FilesTouched))
+	copy(out, s.FilesTouched)
+	return out
+}
+
 // AddDecision records a key decision, keeping at most 5.
 func (s *LoopState) AddDecision(decision string) {
 	s.mu.Lock()

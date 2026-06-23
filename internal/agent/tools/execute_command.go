@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -53,6 +54,13 @@ func (t *ExecuteCommandTool) Execute(ctx context.Context, args map[string]any) (
 	}
 
 	cwd, _ := args["cwd"].(string)
+	if cwd == "" {
+		if LoopStateRef != nil {
+			if paths := LoopStateRef.GetFilesTouched(); len(paths) > 0 {
+				cwd = filepath.Dir(paths[0])
+			}
+		}
+	}
 	if cwd == "" {
 		cwd = "."
 	}

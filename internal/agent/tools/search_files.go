@@ -144,6 +144,13 @@ func searchWithGo(ctx context.Context, query, rootPath, includePattern string, c
 			return nil
 		}
 		if info.IsDir() {
+			name := info.Name()
+			if (strings.HasPrefix(name, ".") && name != ".") || alwaysIgnore[name] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.Size() > 1<<20 {
 			return nil
 		}
 		if includePattern != "" {

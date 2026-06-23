@@ -9,7 +9,7 @@ func AllAgents() []agent.AgentDef {
 			Description:  "通用编程助手，擅长各种语言的编码、调试和解释",
 			SystemPrompt: `You are StarCore, an AI-powered coding assistant integrated into the StarCore IDE. You help developers code, debug, refactor, and understand codebases. You have access to the file system, terminal, git, and web. Always identify yourself as StarCore when asked. Reply in the user's language. Be concise and precise.`,
 			DefaultModel: "", // auto: provider's best available
-			Tools:        []string{"read_file", "write_file", "edit_file", "search_files", "list_directory", "glob_files", "execute_command", "http_request", "web_fetch", "get_git_diff", "git_commit", "git_pull", "git_push", "todo_write", "ask_user", "skill", "sub_agent"},
+			Tools:        []string{"read_file", "write_file", "edit_file", "create_directory", "delete_file", "move_file", "search_files", "list_directory", "glob_files", "execute_command", "http_request", "web_fetch", "get_git_diff", "git_commit", "git_pull", "git_push", "todo_write", "ask_user", "skill", "sub_agent"},
 			Skills:       []string{"generate-test", "code-review", "explain-code", "fix-bug"},
 		},
 		{
@@ -17,7 +17,7 @@ func AllAgents() []agent.AgentDef {
 			Description:  "前端框架/组件/状态管理/性能优化专家",
 			SystemPrompt: `You are a senior frontend architect. Expert in React, Vue, Svelte, Angular. Skilled in component design, state management, performance optimization, and build tooling. Focus on: component decomposition, state management choices, rendering performance, build optimization. Reply in the user's language.`,
 			DefaultModel: "", // auto: provider's best available
-			Tools:        []string{"read_file", "write_file", "edit_file", "search_files", "list_directory", "glob_files", "get_git_diff", "git_commit", "git_pull", "git_push", "todo_write", "ask_user", "skill", "sub_agent"},
+			Tools:        []string{"read_file", "write_file", "edit_file", "create_directory", "delete_file", "move_file", "search_files", "list_directory", "glob_files", "get_git_diff", "git_commit", "git_pull", "git_push", "todo_write", "ask_user", "skill", "sub_agent"},
 			Skills:       []string{"code-review", "refactor"},
 		},
 		{
@@ -25,7 +25,7 @@ func AllAgents() []agent.AgentDef {
 			Description:  "后端架构/API设计/数据库/微服务专家",
 			SystemPrompt: `You are a senior backend architect. Expert in Go, Node.js, Python, Java. Skilled in API design, database optimization, microservices, and system design. Focus on: API specs, data models, concurrency, error handling, scalability. Reply in the user's language.`,
 			DefaultModel: "", // auto: provider's best available
-			Tools:        []string{"read_file", "write_file", "edit_file", "search_files", "glob_files", "execute_command", "http_request", "web_fetch", "get_git_diff", "git_commit", "git_pull", "git_push", "todo_write", "ask_user", "skill", "sub_agent"},
+			Tools:        []string{"read_file", "write_file", "edit_file", "create_directory", "delete_file", "move_file", "search_files", "glob_files", "execute_command", "http_request", "web_fetch", "get_git_diff", "git_commit", "git_pull", "git_push", "todo_write", "ask_user", "skill", "sub_agent"},
 			Skills:       []string{"generate-test", "code-review", "sql-optimize"},
 		},
 		{
@@ -41,7 +41,7 @@ func AllAgents() []agent.AgentDef {
 			Description:  "UI/UX设计/组件设计/样式/配色/设计系统",
 			SystemPrompt: `You are a professional UI designer. Expert in design systems, component libraries, responsive layouts, color schemes, and interaction design. Focus on: visual consistency, accessibility, responsive adaptation, design tokens. Output usable CSS/component code. Reply in the user's language.`,
 			DefaultModel: "", // auto: provider's best available
-			Tools:        []string{"read_file", "write_file", "edit_file", "search_files", "list_directory", "glob_files", "get_git_diff", "git_commit", "git_pull", "git_push", "todo_write", "ask_user", "skill", "sub_agent"},
+			Tools:        []string{"read_file", "write_file", "edit_file", "create_directory", "delete_file", "move_file", "search_files", "list_directory", "glob_files", "get_git_diff", "git_commit", "git_pull", "git_push", "todo_write", "ask_user", "skill", "sub_agent"},
 			Skills:       []string{"code-review", "refactor"},
 		},
 		{
@@ -49,7 +49,7 @@ func AllAgents() []agent.AgentDef {
 			Description:  "CI/CD/Docker/K8s/部署/监控",
 			SystemPrompt: `You are a senior DevOps engineer. Expert in Docker, Kubernetes, CI/CD, cloud services, and monitoring. Focus on: containerization best practices, deployment security, resource optimization, monitoring coverage. Output ready-to-use config files. Reply in the user's language.`,
 			DefaultModel: "", // auto: provider's best available
-			Tools:        []string{"read_file", "write_file", "edit_file", "execute_command", "todo_write", "ask_user", "skill", "sub_agent"},
+			Tools:        []string{"read_file", "write_file", "edit_file", "create_directory", "delete_file", "execute_command", "todo_write", "ask_user", "skill", "sub_agent"},
 			Skills:       []string{"generate-doc"},
 		},
 		{
@@ -57,7 +57,7 @@ func AllAgents() []agent.AgentDef {
 			Description:  "性能分析/瓶颈定位/优化建议",
 			SystemPrompt: `You are a performance optimization expert. Skilled in frontend/backend performance, database optimization, caching strategies, and load testing. Provide: current bottleneck, optimization plan (short+long term), expected gains, risk assessment. Reply in the user's language.`,
 			DefaultModel: "", // auto: provider's best available
-			Tools:        []string{"read_file", "write_file", "edit_file", "search_files", "glob_files", "execute_command", "http_request", "web_fetch", "get_git_diff", "git_commit", "git_pull", "git_push", "todo_write", "ask_user", "skill", "sub_agent"},
+			Tools:        []string{"read_file", "write_file", "edit_file", "create_directory", "delete_file", "move_file", "search_files", "glob_files", "execute_command", "http_request", "web_fetch", "get_git_diff", "git_commit", "git_pull", "git_push", "todo_write", "ask_user", "skill", "sub_agent"},
 			Skills:       []string{"code-review", "sql-optimize"},
 		},
 		{
@@ -65,7 +65,7 @@ func AllAgents() []agent.AgentDef {
 			Description:  "API测试/Mock/压力测试/覆盖率",
 			SystemPrompt: `You are a professional API test engineer. Expert in testing frameworks, mocking, stress testing, and coverage analysis. Output complete, runnable test code covering happy paths, error paths, and edge cases. Reply in the user's language.`,
 			DefaultModel: "", // auto: provider's best available
-			Tools:        []string{"read_file", "write_file", "edit_file", "search_files", "glob_files", "execute_command", "http_request", "web_fetch", "get_git_diff", "git_commit", "git_pull", "git_push", "todo_write", "ask_user", "skill", "sub_agent"},
+			Tools:        []string{"read_file", "write_file", "edit_file", "create_directory", "delete_file", "move_file", "search_files", "glob_files", "execute_command", "http_request", "web_fetch", "get_git_diff", "git_commit", "git_pull", "git_push", "todo_write", "ask_user", "skill", "sub_agent"},
 			Skills:       []string{"generate-test"},
 		},
 		{
@@ -81,7 +81,7 @@ func AllAgents() []agent.AgentDef {
 			Description:  "LLM集成/Prompt工程/AI应用开发",
 			SystemPrompt: `You are an AI integration engineer. Expert in LLM API integration, prompt engineering, embeddings, RAG, agent frameworks, and multimodal processing. Focus on: prompt template design, token optimization, error retry, streaming, model selection. Reply in the user's language.`,
 			DefaultModel: "", // auto: provider's best available
-			Tools:        []string{"read_file", "write_file", "edit_file", "search_files", "glob_files", "todo_write", "ask_user", "skill", "sub_agent"},
+			Tools:        []string{"read_file", "write_file", "edit_file", "create_directory", "delete_file", "move_file", "search_files", "glob_files", "todo_write", "ask_user", "skill", "sub_agent"},
 			Skills:       []string{"generate-test", "generate-doc"},
 		},
 	}

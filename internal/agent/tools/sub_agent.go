@@ -190,11 +190,11 @@ func runSingleSubAgent(ctx context.Context, task string, extContext string, mode
 
 	switch mode {
 	case "build":
-		systemPrompt = "You are a focused implementation sub-agent. You can read files, write files, edit files, search code, and execute commands. Implement the task precisely. After implementation, verify your changes work correctly. Be thorough and concise."
-		tools = []string{"read_file", "write_file", "edit_file", "glob_files", "search_files", "list_directory", "get_git_diff", "execute_command"}
+		systemPrompt = "You are a focused implementation sub-agent. You can read files, write files, edit files, search code, execute commands, and invoke skills. Implement the task precisely. After implementation, verify your changes work correctly. Be thorough and concise."
+		tools = []string{"read_file", "write_file", "edit_file", "glob_files", "search_files", "list_directory", "get_git_diff", "execute_command", "skill"}
 	default:
-		systemPrompt = "You are a focused analysis sub-agent. Use read_file, search_files, list_directory, get_git_diff to investigate. Be thorough. After analysis, write a clear summary with specific findings, file paths, and code. Do NOT write or modify any files. Be concise."
-		tools = []string{"read_file", "glob_files", "search_files", "list_directory", "get_git_diff"}
+		systemPrompt = "You are a focused analysis sub-agent. Use read_file, search_files, list_directory, get_git_diff to investigate. You can also invoke skills for specialized analysis. Be thorough. After analysis, write a clear summary with specific findings, file paths, and code. Do NOT write or modify any files. Be concise."
+		tools = []string{"read_file", "glob_files", "search_files", "list_directory", "get_git_diff", "skill"}
 	}
 
 	req := provider.ChatRequest{
