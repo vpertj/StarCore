@@ -663,7 +663,7 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
                   {new Date(message.timestamp).toLocaleTimeString()}
                 </span>
               </div>
-              <div class="text-sm leading-relaxed" style="color: var(--text-primary);">
+              <div class="msg-content text-sm leading-relaxed" style="color: var(--text-primary);">
                 {#if message.role === 'assistant' && message.content.startsWith('Error:')}
                   {@const errInfo = classifyError(message.content)}
                   <div class="panel-card mt-1" style="border-left: 3px solid var(--error); background-color: rgba(248,81,73,0.08); padding: 8px 12px; border-radius: 6px;">
@@ -1247,6 +1247,87 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
   font-family: var(--font-mono);
   font-size: 13px;
   color: var(--warning);
+}
+
+/* Markdown rendered content styles */
+:global(.msg-content h1),
+:global(.msg-content h2),
+:global(.msg-content h3),
+:global(.msg-content h4) {
+  margin: 12px 0 6px 0;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+:global(.msg-content h1) { font-size: 1.3em; }
+:global(.msg-content h2) { font-size: 1.15em; }
+:global(.msg-content h3) { font-size: 1.05em; }
+
+:global(.msg-content p) {
+  margin: 6px 0;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
+:global(.msg-content ul),
+:global(.msg-content ol) {
+  margin: 6px 0;
+  padding-left: 20px;
+  color: var(--text-primary);
+}
+:global(.msg-content li) {
+  margin: 3px 0;
+  line-height: 1.5;
+}
+
+:global(.msg-content blockquote) {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--accent);
+  background-color: var(--bg-secondary);
+  border-radius: 0 6px 6px 0;
+  color: var(--text-secondary);
+}
+
+:global(.msg-content table) {
+  border-collapse: collapse;
+  margin: 8px 0;
+  width: 100%;
+  font-size: 13px;
+}
+:global(.msg-content th),
+:global(.msg-content td) {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+}
+:global(.msg-content th) {
+  background-color: var(--bg-secondary);
+  font-weight: 600;
+}
+
+:global(.msg-content a) {
+  color: var(--accent);
+  text-decoration: none;
+}
+:global(.msg-content a:hover) {
+  text-decoration: underline;
+}
+
+:global(.msg-content hr) {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 12px 0;
+}
+
+:global(.msg-content strong) {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+:global(.msg-content em) {
+  font-style: italic;
+  color: var(--text-secondary);
 }
 
 /* Hide all code action buttons in auto modes (Build/Plan) — AI handles everything */
