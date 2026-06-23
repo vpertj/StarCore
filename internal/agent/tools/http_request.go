@@ -25,9 +25,7 @@ func (t *HTTPRequestTool) Name() string           { return "HTTP Request" }
 func (t *HTTPRequestTool) RequiresApproval() bool { return true }
 
 func (t *HTTPRequestTool) Description() string {
-	return "Make an HTTP request to test APIs or fetch web resources. " +
-		"Supports GET, POST, PUT, DELETE. Returns status code, headers, and body. " +
-		"Use this for API testing, endpoint verification, or checking web services."
+	return "发送 HTTP 请求。用于测试 API、检查端点。支持 GET/POST/PUT/DELETE。"
 }
 
 func (t *HTTPRequestTool) Parameters() agent.ToolParameters {

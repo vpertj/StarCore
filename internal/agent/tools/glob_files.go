@@ -21,10 +21,7 @@ func (t *GlobTool) Name() string           { return "Glob Files" }
 func (t *GlobTool) RequiresApproval() bool { return false }
 
 func (t *GlobTool) Description() string {
-	return "Find files matching a glob pattern (e.g. \"src/**/*.go\", \"*.json\"). " +
-		"Returns matching file paths sorted alphabetically. " +
-		"Supports ** for recursive directory matching. " +
-		"Automatically ignores node_modules, .git, vendor, and other common dirs."
+	return "按 glob 模式查找文件（如 '**/*.go'、'src/**/*.tsx'）。自动忽略 node_modules、.git 等目录。"
 }
 
 func (t *GlobTool) Parameters() agent.ToolParameters {

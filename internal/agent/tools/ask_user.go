@@ -100,10 +100,7 @@ func (t *AskUserTool) Name() string           { return "Ask User" }
 func (t *AskUserTool) RequiresApproval() bool { return false }
 
 func (t *AskUserTool) Description() string {
-	return "Ask the user a clarifying question when requirements are ambiguous. " +
-		"Use when: multiple valid approaches exist, a design decision needs user preference, " +
-		"or the task scope is unclear. Provide a clear question and optional options list. " +
-		"DO NOT use for trivial yes/no questions — make your best judgment for small decisions."
+	return "向用户提问以澄清需求。仅在需求模糊、有多种方案、或需要用户决策时使用。不要用于简单的确认。"
 }
 
 func (t *AskUserTool) Parameters() agent.ToolParameters {

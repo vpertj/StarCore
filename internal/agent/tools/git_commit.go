@@ -17,7 +17,7 @@ func (t *GitCommitTool) Name() string           { return "Git Commit" }
 func (t *GitCommitTool) RequiresApproval() bool { return true }
 
 func (t *GitCommitTool) Description() string {
-	return "Stage and commit all changes with a conventional commit message"
+	return "暂存并提交代码变更。默认暂存所有文件，可用 files 参数指定特定文件。"
 }
 
 func (t *GitCommitTool) Parameters() agent.ToolParameters {

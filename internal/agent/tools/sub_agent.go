@@ -43,7 +43,7 @@ func (t *SubAgentTool) Name() string           { return "Sub Agent" }
 func (t *SubAgentTool) RequiresApproval() bool { return false }
 
 func (t *SubAgentTool) Description() string {
-	return "Spawn independent sub-agents to analyze or implement tasks. Supports parallel execution of multiple sub-agents, each with its own context window. Sub-agents can read files, search code, and (if mode=build) write files and execute commands. Use this to delegate focused work without polluting the main conversation context."
+	return "派生子智能体处理独立任务。子智能体有自己的上下文，不会污染主对话。适合：代码审查、安全审计、跨文件追踪等需要大量阅读的独立任务。"
 }
 
 func (t *SubAgentTool) Parameters() agent.ToolParameters {

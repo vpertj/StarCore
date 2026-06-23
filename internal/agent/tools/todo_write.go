@@ -22,9 +22,7 @@ func (t *TodoWriteTool) Name() string           { return "Update Task List" }
 func (t *TodoWriteTool) RequiresApproval() bool { return false }
 
 func (t *TodoWriteTool) Description() string {
-	return "Update the AI's working task list. Call this after completing a step or when the plan changes. " +
-		"Pass the FULL list (replaces previous). Each item: content (imperative), status (pending|in_progress|completed), activeForm (gerund for display while in_progress). " +
-		"Exactly ONE item may be in_progress at a time. Pass [] to clear."
+	return "更新任务列表。传入完整列表（替换之前的）。每个任务：content（内容）、status（pending/in_progress/completed）、activeForm（进行中时的描述）。"
 }
 
 func (t *TodoWriteTool) Parameters() agent.ToolParameters {

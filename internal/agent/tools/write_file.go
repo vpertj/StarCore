@@ -18,7 +18,7 @@ func (t *WriteFileTool) Name() string           { return "Write File" }
 func (t *WriteFileTool) RequiresApproval() bool { return true }
 
 func (t *WriteFileTool) Description() string {
-	return "Write content to a file. Creates the file if it does not exist."
+	return "创建或覆写文件。使用 edit_file 做局部修改，write_file 适合创建新文件或完全重写。自动创建父目录。"
 }
 
 func (t *WriteFileTool) Parameters() agent.ToolParameters {

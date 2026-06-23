@@ -19,7 +19,7 @@ func (t *ReadFileTool) Name() string           { return "Read File" }
 func (t *ReadFileTool) RequiresApproval() bool { return false }
 
 func (t *ReadFileTool) Description() string {
-	return "Read the contents of a file. Optionally specify start_line and end_line to read a specific range."
+	return "读取文件内容。可指定 start_line/end_line 读取部分。修改文件前先读取了解当前代码。"
 }
 
 func (t *ReadFileTool) Parameters() agent.ToolParameters {

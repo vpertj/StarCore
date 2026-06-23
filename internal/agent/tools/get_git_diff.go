@@ -19,7 +19,7 @@ func (t *GetGitDiffTool) Name() string           { return "Get Git Info" }
 func (t *GetGitDiffTool) RequiresApproval() bool { return false }
 
 func (t *GetGitDiffTool) Description() string {
-	return "Get git information: diff, status, or recent log. Use action parameter to specify which."
+	return "获取 git 信息：diff（变更差异）、status（文件状态）、log（最近提交）。"
 }
 
 func (t *GetGitDiffTool) Parameters() agent.ToolParameters {

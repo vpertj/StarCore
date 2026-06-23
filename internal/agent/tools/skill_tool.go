@@ -22,7 +22,7 @@ func (t *SkillTool) Name() string           { return "Invoke Skill" }
 func (t *SkillTool) RequiresApproval() bool { return false }
 
 func (t *SkillTool) Description() string {
-	return "Invoke a StarCore skill by its ID. Use this to delegate work to specialized skills like code-review, refactor, explain-code, etc. Pass the skill ID and optionally additional context for the skill."
+	return "调用预定义技能（如代码审查、生成测试、解释代码）。传入 skillId 和可选的用户输入。"
 }
 
 func (t *SkillTool) Parameters() agent.ToolParameters {

@@ -21,7 +21,7 @@ func (t *SearchFilesTool) Name() string           { return "Search Files" }
 func (t *SearchFilesTool) RequiresApproval() bool { return false }
 
 func (t *SearchFilesTool) Description() string {
-	return "Search for a pattern in files. Supports regex, case sensitivity, and file pattern filters. Uses ripgrep (rg) when available for fast search."
+	return "在文件中搜索文本模式。支持正则、大小写。优先用此工具定位代码，不要用 Bash 跑 grep。"
 }
 
 func (t *SearchFilesTool) Parameters() agent.ToolParameters {

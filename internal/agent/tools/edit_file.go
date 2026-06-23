@@ -18,10 +18,7 @@ func (t *EditFileTool) Name() string           { return "Edit File" }
 func (t *EditFileTool) RequiresApproval() bool { return true }
 
 func (t *EditFileTool) Description() string {
-	return "Make a precise edit to a file by replacing an exact string match. " +
-		"Prefer this over write_file for targeted changes. " +
-		"The old_string must uniquely match the text to replace (including whitespace). " +
-		"If the string is not unique, the edit fails — provide more surrounding context to make it unique."
+	return "精确替换文件中的文本。old_string 必须唯一匹配（包括空格）。比 write_file 更安全，适合修改已有文件的局部内容。"
 }
 
 func (t *EditFileTool) Parameters() agent.ToolParameters {

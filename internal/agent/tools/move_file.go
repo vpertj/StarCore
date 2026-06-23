@@ -19,7 +19,7 @@ func (t *MoveFileTool) Name() string           { return "Move/Rename File" }
 func (t *MoveFileTool) RequiresApproval() bool { return true }
 
 func (t *MoveFileTool) Description() string {
-	return "Move or rename a file. Works across directories. Creates parent directories of the destination if needed."
+	return "移动或重命名文件。自动创建目标父目录。"
 }
 
 func (t *MoveFileTool) Parameters() agent.ToolParameters {

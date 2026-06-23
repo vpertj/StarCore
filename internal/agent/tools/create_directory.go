@@ -18,7 +18,7 @@ func (t *CreateDirectoryTool) Name() string           { return "Create Directory
 func (t *CreateDirectoryTool) RequiresApproval() bool { return true }
 
 func (t *CreateDirectoryTool) Description() string {
-	return "Create a directory (and parent directories if needed). Use for scaffolding project structure."
+	return "创建目录（自动创建父目录）。用于搭建项目结构。"
 }
 
 func (t *CreateDirectoryTool) Parameters() agent.ToolParameters {

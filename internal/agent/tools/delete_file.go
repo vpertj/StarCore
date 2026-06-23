@@ -18,7 +18,7 @@ func (t *DeleteFileTool) Name() string           { return "Delete File" }
 func (t *DeleteFileTool) RequiresApproval() bool { return true }
 
 func (t *DeleteFileTool) Description() string {
-	return "Delete a file. Use for removing generated files, temp files, or files that are no longer needed. Does NOT delete directories — use 'rm -r' via execute_command for that."
+	return "删除文件。不能删除目录（需用 execute_command + rm -r）。"
 }
 
 func (t *DeleteFileTool) Parameters() agent.ToolParameters {

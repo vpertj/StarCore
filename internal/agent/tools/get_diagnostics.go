@@ -19,7 +19,7 @@ func (t *GetDiagnosticsTool) Name() string           { return "Get Diagnostics" 
 func (t *GetDiagnosticsTool) RequiresApproval() bool { return false }
 
 func (t *GetDiagnosticsTool) Description() string {
-	return "Get current build/lint diagnostics for the project. Runs go vet for Go projects, or npm ls for Node.js projects."
+	return "获取项目诊断信息。Go 项目运行 go vet，Node.js 项目运行 npm lint。"
 }
 
 func (t *GetDiagnosticsTool) Parameters() agent.ToolParameters {

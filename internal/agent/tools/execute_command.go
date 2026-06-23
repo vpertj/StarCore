@@ -29,10 +29,7 @@ func (t *ExecuteCommandTool) Name() string           { return "Execute Command" 
 func (t *ExecuteCommandTool) RequiresApproval() bool { return true }
 
 func (t *ExecuteCommandTool) Description() string {
-	return "Execute a shell command in the project directory and return its output. " +
-		"Use for running tests, builds, git operations, or inspecting the environment. " +
-		"Long outputs are automatically truncated. " +
-		"Use cwd to specify a working directory (defaults to project root)."
+	return "执行 shell 命令。用于运行测试、构建、git 操作等。Go 项目用 'go build ./...' 和 'go vet ./...'，前端用 'npm run build'。"
 }
 
 func (t *ExecuteCommandTool) Parameters() agent.ToolParameters {

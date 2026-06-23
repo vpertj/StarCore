@@ -27,9 +27,7 @@ func (t *WebFetchTool) Name() string           { return "Web Fetch" }
 func (t *WebFetchTool) RequiresApproval() bool { return false }
 
 func (t *WebFetchTool) Description() string {
-	return "Fetch a web page and extract its readable text content. " +
-		"Useful for reading documentation, checking web pages, or inspecting API responses " +
-		"that return HTML. Strips scripts, styles, and navigation."
+	return "抓取网页内容并提取文本。用于读取文档、检查网页。"
 }
 
 func (t *WebFetchTool) Parameters() agent.ToolParameters {
