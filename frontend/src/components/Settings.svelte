@@ -219,6 +219,7 @@
   applyUIFont();
 
   let fontApplyTimer = /** @type {ReturnType<typeof setTimeout>|null} */ (null)
+  let isSlidingFont = false
 
   function applyUIFont() {
     const family =
@@ -230,16 +231,15 @@
     document.body.style.fontFamily = family;
   }
 
-  function debouncedApplyFont() {
-    // Show preview immediately via CSS variable (no reflow)
-    document.documentElement.style.setProperty('--preview-font-size', settings.fontSize + 'px')
-    // Debounce the actual DOM reflow to 150ms after user stops sliding
-    if (fontApplyTimer) clearTimeout(fontApplyTimer)
-    fontApplyTimer = setTimeout(() => {
-      applyUIFont()
-      saveSettings()
-      fontApplyTimer = null
-    }, 150)
+  function onFontSliderInput() {
+    // During sliding: only update the display label, do NOT touch the DOM
+    // The label binds to settings.fontSize so it updates automatically
+  }
+
+  function onFontSliderChange() {
+    // Apply font size only when slider is released (mouseup/touchend)
+    applyUIFont()
+    saveSettings()
   }
 
   async function checkUpdate() {
@@ -512,7 +512,8 @@
                     min="10"
                     max="24"
                     class="flex-1"
-                    oninput={() => debouncedApplyFont()}
+                    oninput={onFontSliderInput}
+                    onchange={onFontSliderChange}
                   />
                   <span
                     class="text-sm font-mono"
