@@ -106,7 +106,16 @@ export function saveCustomModels(newCustomModels) {
 }
 
 export function refreshCustomModels() {
-  customModels.set(getCustomModels())
+  // Try Go backend first (authoritative source), fallback to localStorage
+  LoadCustomModels().then(list => {
+    if (list && list.length > 0) {
+      customModels.set(list)
+    } else {
+      customModels.set(getCustomModels())
+    }
+  }).catch(() => {
+    customModels.set(getCustomModels())
+  })
 }
 
 export const allAvailableModels = derived(

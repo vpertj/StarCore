@@ -1098,8 +1098,6 @@
               const groupId = isBuiltin ? editProviderId : editProviderId;
               const backendPid = editProviderType === "anthropic" ? "anthropic" : editProviderType === "ollama" ? "ollama" : "openai";
 
-              // Persist provider config to Go backend using groupId (not backendPid)
-              // so each custom provider has its own config entry
               try {
                 await setProviderConfig(groupId, {
                   name: editProviderName || editProviderId,
@@ -1108,18 +1106,14 @@
                   enabled: true,
                 });
               } catch (e) {
-                console.error('Failed to save provider config:', e);
                 alert('保存供应商配置失败: ' + (e.message || e));
                 return;
               }
 
-              // Build final model list: keep models NOT for this provider,
-              // then add updated existing models + pending models with final groupId/providerId
               const allModels = [...(get(customModels) || [])];
               const otherModels = allModels.filter(m => (m.groupId || m.providerId) !== editProviderId);
               const providerModels = [];
 
-              // Update existing models for this provider
               for (const m of allModels) {
                 if ((m.groupId || m.providerId) === editProviderId) {
                   providerModels.push({
@@ -1135,7 +1129,6 @@
                 }
               }
 
-              // Add pending models with final IDs
               for (const pm of pendingEditModels) {
                 const finalId = `${groupId}:${pm.modelId}`;
                 if (!providerModels.find(m => m.id === finalId)) {
@@ -1155,8 +1148,6 @@
                 }
               }
 
-              // If nothing added but user filled provider name and this is a new provider,
-              // create a placeholder model so the card appears.
               if (providerModels.length === 0 && !isBuiltin && editProviderName) {
                 const compositeId = `${groupId}:${editProviderName || 'default'}`;
                 providerModels.push({
@@ -1173,7 +1164,6 @@
                 });
               }
 
-              // Single save with the final combined list
               saveCustomModels([...otherModels, ...providerModels]);
               pendingEditModels = [];
               showEditProviderDialog = false;
