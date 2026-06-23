@@ -488,6 +488,12 @@ func (s *Service) ChatStream(req provider.ChatRequest) error {
 			}
 			if len(tools) > 0 {
 				req.Tools = s.buildToolDefinitions(tools)
+				// Also inject tool instructions into the prompt for models that
+				// don't support function calling format
+				toolHint := buildToolUsageHint(req.Tools, "")
+				if toolHint != "" {
+					req.Messages = append([]provider.Message{{Role: "system", Content: toolHint}}, req.Messages...)
+				}
 			} else {
 				req.Tools = nil
 			}
