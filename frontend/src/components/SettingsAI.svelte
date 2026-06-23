@@ -860,7 +860,7 @@
     >
       <div class="flex items-center justify-between mb-4">
         <h3 class="text-base font-medium" style="color: var(--text-primary);">
-          {builtinProviders.find((p) => p.id === editProviderId)?.name ||
+          {editProviderName || builtinProviders.find((p) => p.id === editProviderId)?.name ||
             editProviderId}
         </h3>
         <button
@@ -1100,7 +1100,18 @@
 
               // Persist provider config to Go backend using groupId (not backendPid)
               // so each custom provider has its own config entry
-              await setProviderConfig(groupId, { apiKey: editApiKey, endpoint: editEndpoint });
+              try {
+                await setProviderConfig(groupId, {
+                  name: editProviderName || editProviderId,
+                  apiKey: editApiKey,
+                  endpoint: editEndpoint,
+                  enabled: true,
+                });
+              } catch (e) {
+                console.error('Failed to save provider config:', e);
+                alert('保存供应商配置失败: ' + (e.message || e));
+                return;
+              }
 
               // Build final model list: keep models NOT for this provider,
               // then add updated existing models + pending models with final groupId/providerId
