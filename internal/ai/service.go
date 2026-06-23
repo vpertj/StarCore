@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -988,6 +989,15 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 			return
 		}
 
+		// If no function-calling tool calls, try parsing text-based tool calls
+		if !toolCallsSeen && assistantContent != "" {
+			textCalls := parseTextToolCalls(assistantContent)
+			if len(textCalls) > 0 {
+				toolCalls = append(toolCalls, textCalls...)
+				toolCallsSeen = true
+			}
+		}
+
 		if !toolCallsSeen {
 			s.cb.RecordSuccess()
 			if assistantContent == "" {
@@ -1614,20 +1624,19 @@ func pruneMessages(msgs []provider.Message, keepRecent int) []provider.Message {
 	return result
 }
 
-// buildToolUsageHint generates explicit tool calling instructions for models
-// that don't properly support the OpenAI function calling format.
+// buildToolUsageHint generates explicit tool calling instructions for all models.
+// Includes both function calling format and text-based format for maximum compatibility.
 func buildToolUsageHint(tools []provider.ToolDefinition, lastContent string) string {
 	if len(tools) == 0 {
 		return ""
 	}
 
 	var hint strings.Builder
-	hint.WriteString("\n## 工具调用格式（必须遵守）\n")
-	hint.WriteString("你必须使用以下工具来完成任务。不要只输出文字描述，要实际调用工具。\n\n")
+	hint.WriteString("\n## 可用工具\n")
+	hint.WriteString("你必须使用工具来完成任务，不要只输出文字描述。\n\n")
 
 	for _, t := range tools {
 		hint.WriteString(fmt.Sprintf("### %s\n%s\n", t.Function.Name, t.Function.Description))
-		// Show required parameters
 		if params, ok := t.Function.Parameters.(agent.ToolParameters); ok {
 			if len(params.Required) > 0 {
 				hint.WriteString(fmt.Sprintf("必需参数: %s\n", strings.Join(params.Required, ", ")))
@@ -1636,10 +1645,63 @@ func buildToolUsageHint(tools []provider.ToolDefinition, lastContent string) str
 		hint.WriteString("\n")
 	}
 
-	hint.WriteString("## 调用示例\n")
-	hint.WriteString("要读取文件，请直接调用 read_file 工具，参数为 {\"path\": \"文件路径\"}。\n")
-	hint.WriteString("要搜索代码，请直接调用 search_files 工具，参数为 {\"query\": \"搜索内容\"}。\n")
-	hint.WriteString("不要在文字中描述你要做什么，直接调用工具执行。\n")
+	hint.WriteString("## 调用方式\n")
+	hint.WriteString("如果模型支持 function calling，请使用工具调用格式。\n")
+	hint.WriteString("如果不支持，请在回复中使用以下格式（每行一个工具调用）：\n")
+	hint.WriteString("[TOOL: 工具名 {\"参数名\": \"参数值\"}]\n\n")
+	hint.WriteString("示例：\n")
+	hint.WriteString("[TOOL: read_file {\"path\": \"main.go\"}]\n")
+	hint.WriteString("[TOOL: search_files {\"query\": \"func main\"}]\n")
+	hint.WriteString("[TOOL: execute_command {\"command\": \"go build ./...\"}]\n\n")
+	hint.WriteString("重要：必须实际调用工具，不要只说\"我来读取\"。\n")
 
 	return hint.String()
+}
+
+// parseTextToolCalls extracts tool calls from text output using [TOOL: name {args}] format.
+func parseTextToolCalls(content string) []provider.ToolCall {
+	var calls []provider.ToolCall
+	// Match [TOOL: name {json}] or [TOOL:name {json}]
+	re := regexp.MustCompile(`\[TOOL:\s*(\w+)\s*\{([^}]+)\}\]`)
+	matches := re.FindAllStringSubmatch(content, -1)
+
+	for _, match := range matches {
+		toolName := match[1]
+		argsStr := match[2]
+
+		// Try to parse as JSON
+		var args map[string]any
+		if err := json.Unmarshal([]byte("{"+argsStr+"}"), &args); err != nil {
+			// If JSON parsing fails, try key:value format
+			args = parseKeyValueArgs(argsStr)
+		}
+
+		argsJSON, _ := json.Marshal(args)
+		calls = append(calls, provider.ToolCall{
+			ID:   fmt.Sprintf("tc_%d", time.Now().UnixNano()),
+			Type: "function",
+			Function: provider.ToolCallFunc{
+				Name:      toolName,
+				Arguments: string(argsJSON),
+			},
+		})
+	}
+	return calls
+}
+
+// parseKeyValueArgs parses "key:value, key2:value2" format into a map.
+func parseKeyValueArgs(s string) map[string]any {
+	args := make(map[string]any)
+	pairs := strings.Split(s, ",")
+	for _, pair := range pairs {
+		parts := strings.SplitN(strings.TrimSpace(pair), ":", 2)
+		if len(parts) == 2 {
+			key := strings.TrimSpace(parts[0])
+			val := strings.TrimSpace(parts[1])
+			// Remove surrounding quotes
+			val = strings.Trim(val, "\"'")
+			args[key] = val
+		}
+	}
+	return args
 }
