@@ -218,17 +218,28 @@
   // Apply UI font family on load
   applyUIFont();
 
+  let fontApplyTimer = /** @type {ReturnType<typeof setTimeout>|null} */ (null)
+
   function applyUIFont() {
     const family =
       settings.fontFamily === "system"
         ? "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
         : "'" + settings.fontFamily + "', monospace";
-    // Set on <html> root so REM-based Tailwind utilities (text-sm, text-xs)
-    // in sidebar, file tree, tabs etc. all scale with the user preference.
     document.documentElement.style.fontFamily = family;
     document.documentElement.style.fontSize = settings.fontSize + "px";
-    // Also set body for non-REM consumers
     document.body.style.fontFamily = family;
+  }
+
+  function debouncedApplyFont() {
+    // Show preview immediately via CSS variable (no reflow)
+    document.documentElement.style.setProperty('--preview-font-size', settings.fontSize + 'px')
+    // Debounce the actual DOM reflow to 150ms after user stops sliding
+    if (fontApplyTimer) clearTimeout(fontApplyTimer)
+    fontApplyTimer = setTimeout(() => {
+      applyUIFont()
+      saveSettings()
+      fontApplyTimer = null
+    }, 150)
   }
 
   async function checkUpdate() {
@@ -501,10 +512,7 @@
                     min="10"
                     max="24"
                     class="flex-1"
-                    oninput={() => {
-                      saveSettings();
-                      applyUIFont();
-                    }}
+                    oninput={() => debouncedApplyFont()}
                   />
                   <span
                     class="text-sm font-mono"
