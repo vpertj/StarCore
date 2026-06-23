@@ -770,14 +770,25 @@ func (s *Service) retryableChatStream(roundCtx context.Context, req provider.Cha
 func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 	currentReq := req
 
-	var doneEmitted bool
+	var doneMu sync.Mutex
+	doneEmitted := false
+	setDone := func() {
+		doneMu.Lock()
+		doneEmitted = true
+		doneMu.Unlock()
+	}
+	isDone := func() bool {
+		doneMu.Lock()
+		defer doneMu.Unlock()
+		return doneEmitted
+	}
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("runAgentLoop panic: %v", r)
 			s.emitFn("ai:stream:error", fmt.Sprintf("内部错误: %v", r))
-			doneEmitted = true
+			setDone()
 		}
-		if !doneEmitted {
+		if !isDone() {
 			s.emitFn("ai:stream:done", "")
 		}
 	}()
@@ -795,7 +806,7 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			s.emitFn("ai:stream:done", "cancelled")
-			doneEmitted = true
+			setDone()
 			return
 		case extra := <-s.continueCh:
 			maxLoops = loop + extra
@@ -824,7 +835,7 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 			}
 			s.emitFn("ai:stream:error", userMsg)
 			roundCancel()
-			doneEmitted = true
+			setDone()
 			return
 		}
 
@@ -880,7 +891,7 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 				}
 				s.emitFn("ai:stream:error", userMsg)
 				roundCancel()
-				doneEmitted = true
+				setDone()
 				return
 			case "tool_call":
 				if len(event.ToolCalls) > 0 {
@@ -972,7 +983,7 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 		if !streamReceivedAny {
 			s.cb.RecordFailure()
 			s.emitFn("ai:stream:error", provider.T("no_response"))
-			doneEmitted = true
+			setDone()
 			return
 		}
 
@@ -990,7 +1001,7 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 					s.emitFn("ai:stream:data", resp.Content)
 				} else {
 					s.emitFn("ai:stream:error", provider.T("no_content"))
-					doneEmitted = true
+					setDone()
 					return
 				}
 			}
@@ -1022,7 +1033,7 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 						donePayload["usage"] = streamUsage
 					}
 					s.emitFn("ai:stream:done", donePayload)
-					doneEmitted = true
+					setDone()
 					return
 				}
 
@@ -1041,7 +1052,7 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 						donePayload["usage"] = streamUsage
 					}
 					s.emitFn("ai:stream:done", donePayload)
-					doneEmitted = true
+					setDone()
 					return
 				}
 
@@ -1070,7 +1081,7 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 					donePayload["usage"] = streamUsage
 				}
 				s.emitFn("ai:stream:done", donePayload)
-				doneEmitted = true
+				setDone()
 				return
 			}
 
@@ -1079,7 +1090,7 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 				donePayload["usage"] = streamUsage
 			}
 			s.emitFn("ai:stream:done", donePayload)
-			doneEmitted = true
+			setDone()
 
 			// Learn user preferences from this conversation (async, non-blocking)
 			if s.memoryStore != nil && req.ProjectPath != "" {
@@ -1181,11 +1192,29 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 			}
 		}
 
-		// Track files touched by write/edit tools
+		// Track files touched by write/edit/move/delete tools
 		var modifiedFiles []string
 		for _, tc := range toolCalls {
 			switch tc.Function.Name {
-			case "write_file", "edit_file":
+			case "write_file", "edit_file", "create_directory":
+				var args map[string]any
+				if tc.Function.Arguments != "" {
+					json.Unmarshal([]byte(tc.Function.Arguments), &args)
+				}
+				if path, ok := args["path"].(string); ok && path != "" {
+					s.loopState.AddFileTouched(path)
+					modifiedFiles = append(modifiedFiles, path)
+				}
+			case "move_file":
+				var args map[string]any
+				if tc.Function.Arguments != "" {
+					json.Unmarshal([]byte(tc.Function.Arguments), &args)
+				}
+				if dest, ok := args["dest"].(string); ok && dest != "" {
+					s.loopState.AddFileTouched(dest)
+					modifiedFiles = append(modifiedFiles, dest)
+				}
+			case "delete_file":
 				var args map[string]any
 				if tc.Function.Arguments != "" {
 					json.Unmarshal([]byte(tc.Function.Arguments), &args)
@@ -1268,7 +1297,7 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 		"autoContinued": s.autoContinueCount,
 	})
 	s.emitFn("ai:stream:done", "")
-	doneEmitted = true
+	setDone()
 }
 
 // learnPreferences analyzes the conversation and saves observed user preferences.
