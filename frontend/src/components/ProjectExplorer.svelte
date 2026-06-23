@@ -77,7 +77,7 @@
 
   async function handleDelete() {
     if (selectedItem) {
-      if (confirm(`Are you sure you want to delete "${selectedItem.name}"?`)) {
+      if (confirm(`${$t('explorer.confirmDelete')} "${selectedItem.name}"?`)) {
         await deleteFileOrFolder(selectedItem.path)
         hideContextMenu()
       }
@@ -304,12 +304,12 @@
           type="text"
           bind:value={renameValue}
           class="input-field input-field-sm"
-          placeholder="New name"
+          placeholder={$t('explorer.newName')}
           onkeydown={(e) => e.key === 'Enter' && handleRename()}
         />
         <div class="flex gap-2 mt-2">
-          <button class="btn btn-primary btn-sm flex-1" onclick={handleRename}>Rename</button>
-          <button class="btn btn-secondary btn-sm flex-1" onclick={hideContextMenu}>Cancel</button>
+          <button class="btn btn-primary btn-sm flex-1" onclick={handleRename}>{$t('explorer.rename')}</button>
+          <button class="btn btn-secondary btn-sm flex-1" onclick={hideContextMenu}>{$t('explorer.cancel')}</button>
         </div>
       </div>
     {:else if newFileMode}
@@ -318,12 +318,12 @@
           type="text"
           bind:value={newFileName}
           class="input-field input-field-sm"
-          placeholder="File name"
+          placeholder={$t('explorer.newFileName')}
           onkeydown={(e) => e.key === 'Enter' && handleNewFile()}
         />
         <div class="flex gap-2 mt-2">
-          <button class="btn btn-primary btn-sm flex-1" onclick={handleNewFile}>Create</button>
-          <button class="btn btn-secondary btn-sm flex-1" onclick={hideContextMenu}>Cancel</button>
+          <button class="btn btn-primary btn-sm flex-1" onclick={handleNewFile}>{$t('explorer.create')}</button>
+          <button class="btn btn-secondary btn-sm flex-1" onclick={hideContextMenu}>{$t('explorer.cancel')}</button>
         </div>
       </div>
     {:else if newFolderMode}
@@ -332,20 +332,20 @@
           type="text"
           bind:value={newFolderName}
           class="input-field input-field-sm"
-          placeholder="Folder name"
+          placeholder={$t('explorer.newFolderName')}
           onkeydown={(e) => e.key === 'Enter' && handleNewFolder()}
         />
         <div class="flex gap-2 mt-2">
-          <button class="btn btn-primary btn-sm flex-1" onclick={handleNewFolder}>Create</button>
-          <button class="btn btn-secondary btn-sm flex-1" onclick={hideContextMenu}>Cancel</button>
+          <button class="btn btn-primary btn-sm flex-1" onclick={handleNewFolder}>{$t('explorer.create')}</button>
+          <button class="btn btn-secondary btn-sm flex-1" onclick={hideContextMenu}>{$t('explorer.cancel')}</button>
         </div>
       </div>
     {:else}
-      <button class="dropdown-item" onclick={startNewFile}>New File</button>
-      <button class="dropdown-item" onclick={startNewFolder}>New Folder</button>
+      <button class="dropdown-item" onclick={startNewFile}>{$t('explorer.newFile')}</button>
+      <button class="dropdown-item" onclick={startNewFolder}>{$t('explorer.newFolder')}</button>
       <div class="border-t my-1" style="border-color: var(--border);"></div>
-      <button class="dropdown-item" onclick={startRename}>Rename</button>
-      <button class="dropdown-item" style="color: var(--error);" onclick={handleDelete}>Delete</button>
+      <button class="dropdown-item" onclick={startRename}>{$t('explorer.rename')}</button>
+      <button class="dropdown-item" style="color: var(--error);" onclick={handleDelete}>{$t('explorer.delete')}</button>
     {/if}
   </div>
 {/if}
