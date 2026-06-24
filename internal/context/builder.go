@@ -60,8 +60,8 @@ func (b *Builder) SetRAGSearch(fn RAGSearchFunc) {
 // Order: Rules → Structure → Knowledge → RAG → ContextFiles → ActiveFile → SelectedCode
 // The stable prefix (Rules + Structure) is the same across requests, maximizing OpenAI/Anthropic cache hits.
 func (b *Builder) BuildContextMessage(req provider.ChatRequest) string {
-	var stableParts []string    // Stable prefix — same across requests (cacheable)
-	var dynamicParts []string   // Dynamic suffix — varies per request
+	var stableParts []string  // Stable prefix — same across requests (cacheable)
+	var dynamicParts []string // Dynamic suffix — varies per request
 
 	// Dedup: if active file is already in context files, skip it
 	if req.ActiveFile != "" && len(req.ContextFiles) > 0 {
@@ -110,21 +110,16 @@ func (b *Builder) BuildContextMessage(req provider.ChatRequest) string {
 
 	// 3. Knowledge Base (relatively stable)
 	if req.ProjectPath != "" && b.memoryStore != nil {
-		lastUserMsg := ""
-		for i := len(req.Messages) - 1; i >= 0; i-- {
-			if req.Messages[i].Role == "user" {
-				lastUserMsg = req.Messages[i].Content
-				break
-			}
-		}
-		knowledge := b.injectKnowledge(req.ProjectPath, lastUserMsg)
+		// Use recent conversation context for better knowledge matching, not just last message
+		queryContext := b.buildQueryContext(req.Messages)
+		knowledge := b.injectKnowledge(req.ProjectPath, queryContext)
 		if knowledge != "" {
 			stableParts = append(stableParts, knowledge)
 		}
 
 		// 4. RAG Results (semi-stable)
-		if b.ragSearch != nil && lastUserMsg != "" {
-			results, err := b.ragSearch(context.Background(), req.ProjectPath, lastUserMsg, 3)
+		if b.ragSearch != nil && queryContext != "" {
+			results, err := b.ragSearch(context.Background(), req.ProjectPath, queryContext, 3)
 			if err == nil && len(results) > 0 {
 				var ragParts strings.Builder
 				ragParts.WriteString("[Relevant Code Context]\nThe following code snippets are semantically relevant to your query:\n\n")
@@ -150,6 +145,9 @@ func (b *Builder) BuildContextMessage(req provider.ChatRequest) string {
 	// === DYNAMIC SUFFIX (varies per request) ===
 
 	// 5. Context Files (user-selected, varies)
+	if len(req.ContextFiles) > 0 {
+		req.ContextFiles = deduplicateContextFiles(req.ContextFiles)
+	}
 	if len(req.ContextFiles) > 0 {
 		var fileParts []string
 		for _, fp := range req.ContextFiles {
@@ -230,7 +228,30 @@ func (b *Builder) BuildContextMessage(req provider.ChatRequest) string {
 	return strings.Join(allParts, "\n\n") + "\n\n[End of context. Use the above information to handle the user's request below.]"
 }
 
-// GetModelContextWindow estimates the context window size for a model.
+// buildQueryContext collects recent user messages to build a richer query for
+// knowledge base and RAG matching. Uses last user message + preceding assistant
+// question context when available, capped at 500 chars.
+func (b *Builder) buildQueryContext(messages []provider.Message) string {
+	var parts []string
+	userCount := 0
+	maxUsers := 3
+	totalChars := 0
+	maxChars := 500
+
+	for i := len(messages) - 1; i >= 0 && userCount < maxUsers && totalChars < maxChars; i-- {
+		msg := messages[i]
+		if msg.Role == "user" {
+			content := msg.Content
+			if len(content)+totalChars > maxChars {
+				content = content[:maxChars-totalChars]
+			}
+			parts = append([]string{content}, parts...)
+			totalChars += len(content)
+			userCount++
+		}
+	}
+	return strings.Join(parts, " ")
+}
 func (b *Builder) GetModelContextWindow(_, modelID string) int {
 	if w := provider.EstimateContextWindow(modelID); w > 0 {
 		return w
@@ -470,6 +491,11 @@ func (b *Builder) scanProjectStructure(projectPath string) string {
 }
 
 func estimateTokens(text string) int {
+	return estimateTokensWithProvider(text, "")
+}
+
+// estimateTokensWithProvider estimates token count with provider-specific ratios.
+func estimateTokensWithProvider(text string, providerID string) int {
 	if len(text) == 0 {
 		return 0
 	}
@@ -492,6 +518,20 @@ func estimateTokens(text string) int {
 			inWord = false
 		}
 	}
+
+	// Provider-specific ratios
+	cjkRatio := 1.5
+	wordRatio := 1.3
+	pid := strings.ToLower(providerID)
+	switch {
+	case strings.Contains(pid, "deepseek"):
+		cjkRatio = 1.3
+		wordRatio = 1.25
+	case strings.Contains(pid, "anthropic") || strings.Contains(pid, "claude"):
+		cjkRatio = 1.6
+		wordRatio = 1.35
+	}
+
 	nonWordChars := 0
 	for _, r := range text {
 		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_') &&
@@ -502,13 +542,13 @@ func estimateTokens(text string) int {
 			nonWordChars++
 		}
 	}
-	return int(float64(cjk)*1.5+float64(asciiWords)*1.3+float64(nonWordChars)*0.4) + 1
+	return int(float64(cjk)*cjkRatio+float64(asciiWords)*wordRatio+float64(nonWordChars)*0.4) + 1
 }
 
 func (b *Builder) summarizeAndCompress(messages []provider.Message, maxTokens int, providerID string) []provider.Message {
 	totalTokens := 0
 	for _, msg := range messages {
-		totalTokens += estimateTokens(msg.Content)
+		totalTokens += estimateTokensWithProvider(msg.Content, providerID)
 	}
 	if totalTokens <= maxTokens {
 		return messages
@@ -526,7 +566,7 @@ func (b *Builder) summarizeAndCompress(messages []provider.Message, maxTokens in
 
 	systemTokens := 0
 	for _, m := range systemMsgs {
-		systemTokens += estimateTokens(m.Content)
+		systemTokens += estimateTokensWithProvider(m.Content, providerID)
 	}
 
 	availableForChat := maxTokens - systemTokens
@@ -542,7 +582,7 @@ func (b *Builder) summarizeAndCompress(messages []provider.Message, maxTokens in
 	recentStart := len(otherMsgs)
 	recentTokens := 0
 	for i := len(otherMsgs) - 1; i >= 0; i-- {
-		msgTokens := estimateTokens(otherMsgs[i].Content)
+		msgTokens := estimateTokensWithProvider(otherMsgs[i].Content, providerID)
 		if recentTokens+msgTokens > recentBudget {
 			break
 		}
