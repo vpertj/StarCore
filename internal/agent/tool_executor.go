@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -22,10 +23,12 @@ type ToolExecutor struct {
 }
 
 type cacheEntry struct {
-	result    *ToolResult
-	createdAt time.Time
-	accessAt  time.Time
-	key       string
+	result      *ToolResult
+	createdAt   time.Time
+	accessAt    time.Time
+	key         string
+	fileModTime time.Time
+	isFileCache bool
 }
 
 type lruList struct {
@@ -74,7 +77,7 @@ func NewToolExecutor() *ToolExecutor {
 		autoApprove:     make(map[string]bool),
 		pendingApproval: make(map[string]chan bool),
 		cache:           make(map[string]*cacheEntry),
-		lru:             newLRUList(200),
+		lru:             newLRUList(500),
 	}
 }
 
@@ -197,16 +200,14 @@ func (e *ToolExecutor) Execute(ctx context.Context, call ToolCall) (*ToolResult,
 	cacheKey := e.buildCacheKey(call)
 	if cacheKey != "" {
 		e.mu.RLock()
-		if entry, exists := e.cache[cacheKey]; exists {
-			if time.Since(entry.createdAt) < 30*time.Second {
-				e.mu.RUnlock()
-				e.mu.Lock()
-				e.lru.touch(cacheKey)
-				e.mu.Unlock()
-				cached := *entry.result
-				cached.CallID = call.ID
-				return &cached, nil
-			}
+		if entry, exists := e.cache[cacheKey]; exists && e.isCacheValid(entry) {
+			e.mu.RUnlock()
+			e.mu.Lock()
+			e.lru.touch(cacheKey)
+			e.mu.Unlock()
+			cached := *entry.result
+			cached.CallID = call.ID
+			return &cached, nil
 		}
 		e.mu.RUnlock()
 	}
@@ -241,8 +242,19 @@ func (e *ToolExecutor) Execute(ctx context.Context, call ToolCall) (*ToolResult,
 	sandbox.LogAudit(call.Name, "execute", call.Args, result, nil, autoApproved)
 
 	if cacheKey != "" && !tool.RequiresApproval() {
+		entry := &cacheEntry{
+			result:    tr,
+			createdAt: time.Now(),
+			accessAt:  time.Now(),
+			key:       cacheKey,
+		}
+		if filePath := extractFilePathFromCacheKey(cacheKey); filePath != "" {
+			if info, err := os.Stat(filePath); err == nil {
+				entry.fileModTime = info.ModTime()
+				entry.isFileCache = true
+			}
+		}
 		e.mu.Lock()
-		entry := &cacheEntry{result: tr, createdAt: time.Now(), accessAt: time.Now(), key: cacheKey}
 		e.cache[cacheKey] = entry
 		e.lru.push(entry)
 		e.mu.Unlock()
@@ -269,6 +281,48 @@ func (e *ToolExecutor) ClearCache() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.cache = make(map[string]*cacheEntry)
+}
+
+func (e *ToolExecutor) isCacheValid(entry *cacheEntry) bool {
+	if entry.isFileCache {
+		filePath := extractFilePathFromCacheKey(entry.key)
+		if filePath == "" {
+			return false
+		}
+		info, err := os.Stat(filePath)
+		if err != nil {
+			return false
+		}
+		return info.ModTime().Equal(entry.fileModTime)
+	}
+	return time.Since(entry.createdAt) < 30*time.Second
+}
+
+func extractFilePathFromCacheKey(key string) string {
+	toolName, rest, ok := strings.Cut(key, ":")
+	if !ok {
+		return ""
+	}
+	switch toolName {
+	case "read_file":
+		if idx := strings.LastIndex(rest, ":"); idx >= 0 {
+			if idx2 := strings.LastIndex(rest[:idx], ":"); idx2 >= 0 {
+				return rest[:idx2]
+			}
+		}
+		return rest
+	case "write_file", "edit_file", "delete_file":
+		return rest
+	case "list_directory":
+		return rest
+	case "glob_files":
+		if idx := strings.Index(rest, ":"); idx >= 0 {
+			return rest[idx+1:]
+		}
+		return rest
+	default:
+		return ""
+	}
 }
 
 func (e *ToolExecutor) buildCacheKey(call ToolCall) string {
