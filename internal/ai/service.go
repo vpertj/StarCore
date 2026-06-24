@@ -115,11 +115,11 @@ type Service struct {
 
 // AgentProgress tracks progress within a single agent loop session.
 type AgentProgress struct {
-	filesModified   map[string]bool // files that have been written/edited
-	toolCallCount   int             // total tool calls made
-	successfulCalls int             // tool calls that succeeded
-	consecutiveEmpty int            // consecutive rounds with no tool calls
-	lastFileCount   int             // file count at last nudge
+	filesModified    map[string]bool // files that have been written/edited
+	toolCallCount    int             // total tool calls made
+	successfulCalls  int             // tool calls that succeeded
+	consecutiveEmpty int             // consecutive rounds with no tool calls
+	lastFileCount    int             // file count at last nudge
 }
 
 func newAgentProgress() *AgentProgress {
@@ -127,7 +127,6 @@ func newAgentProgress() *AgentProgress {
 		filesModified: make(map[string]bool),
 	}
 }
-
 
 // NewService creates a new AI service.
 func NewService(
@@ -145,27 +144,34 @@ func NewService(
 	ls := agentTools.NewLoopState()
 	agentTools.LoopStateRef = ls
 	return &Service{
-		providerMgr:    providerMgr,
-		toolExec:       toolExec,
-		memoryStore:    memoryStore,
-		agentReg:       agentReg,
-		emitFn:         emitFn,
-		buildContext:   buildContext,
-		compress:       compress,
-		contextWindow:  contextWindow,
+		providerMgr:     providerMgr,
+		toolExec:        toolExec,
+		memoryStore:     memoryStore,
+		agentReg:        agentReg,
+		emitFn:          emitFn,
+		buildContext:    buildContext,
+		compress:        compress,
+		contextWindow:   contextWindow,
 		contextWindowFn: contextWindow,
-		appCtx:         appCtx,
-		loopState:      ls,
-		verifyFn:       verifyFn,
-		continueCh:     make(chan int, 1),
-		cb:             NewCircuitBreaker(10, 60*time.Second),
-		sem:            make(chan struct{}, 3),
-		fileHistory:    agentTools.NewFileHistory(),
-		progress:       newAgentProgress(),
+		appCtx:          appCtx,
+		loopState:       ls,
+		verifyFn:        verifyFn,
+		continueCh:      make(chan int, 1),
+		cb:              NewCircuitBreaker(10, 60*time.Second),
+		sem:             make(chan struct{}, 3),
+		fileHistory:     agentTools.NewFileHistory(),
+		progress:        newAgentProgress(),
 	}
 }
 
 func estimateTokens(text string) int {
+	return estimateTokensWithModel(text, "")
+}
+
+// estimateTokensWithModel estimates token count with model-specific ratios.
+// When model is known, uses provider-specific CJK/ASCII ratios for better accuracy.
+// Falls back to cl100k-based defaults for unknown models.
+func estimateTokensWithModel(text string, model string) int {
 	if len(text) == 0 {
 		return 0
 	}
@@ -188,13 +194,33 @@ func estimateTokens(text string) int {
 			inWord = false
 		}
 	}
-	// CJK: ~1.5 tokens per char (cl100k base)
-	// ASCII words: ~1.3 tokens per word (average English word)
-	// Whitespace/punctuation: ~0.5 tokens per char for remaining
-	remaining := len(text) - cjk*3 // rough byte adjustment
-	if remaining < 0 {
-		remaining = 0
+
+	// Model-specific ratios (tokens per CJK character and tokens per ASCII word)
+	cjkRatio := 1.5  // default: cl100k_base
+	wordRatio := 1.3 // default: cl100k_base
+
+	m := strings.ToLower(model)
+	switch {
+	case strings.Contains(m, "deepseek"):
+		cjkRatio = 1.3 // DeepSeek tokenizer is more efficient for Chinese
+		wordRatio = 1.25
+	case strings.Contains(m, "qwen"):
+		cjkRatio = 1.4 // Qwen tokenizer
+		wordRatio = 1.3
+	case strings.Contains(m, "claude"):
+		cjkRatio = 1.6 // Claude tokenizer — slightly less efficient for CJK
+		wordRatio = 1.35
+	case strings.Contains(m, "gpt-4o") || strings.Contains(m, "o1") || strings.Contains(m, "o3"):
+		cjkRatio = 1.5 // o200k_base — similar to cl100k for CJK
+		wordRatio = 1.3
+	case strings.Contains(m, "gpt-") || strings.Contains(m, "o1-") || strings.Contains(m, "o3-"):
+		cjkRatio = 1.5 // cl100k_base
+		wordRatio = 1.3
+	case strings.Contains(m, "gemini"):
+		cjkRatio = 1.55 // Gemini tokenizer
+		wordRatio = 1.3
 	}
+
 	nonWordChars := 0
 	for _, r := range text {
 		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_') &&
@@ -205,7 +231,7 @@ func estimateTokens(text string) int {
 			nonWordChars++
 		}
 	}
-	return int(float64(cjk)*1.5+float64(asciiWords)*1.3+float64(nonWordChars)*0.4) + 1
+	return int(float64(cjk)*cjkRatio+float64(asciiWords)*wordRatio+float64(nonWordChars)*0.4) + 1
 }
 
 func executeToolWithTimeout(ctx context.Context, executor *agent.ToolExecutor, call agent.ToolCall, timeout time.Duration) (*agent.ToolResult, error) {
@@ -537,7 +563,7 @@ func (s *Service) ChatStream(req provider.ChatRequest) error {
 	// Token budget warning — check if we're approaching the limit
 	totalMsgTokens := 0
 	for _, msg := range req.Messages {
-		totalMsgTokens += estimateTokens(msg.Content)
+		totalMsgTokens += estimateTokensWithModel(msg.Content, req.Model)
 	}
 	s.totalTokensUsed += totalMsgTokens
 	usagePercent := float64(totalMsgTokens) / float64(maxContextTokens) * 100
@@ -560,6 +586,15 @@ func (s *Service) Stop() {
 	if s.cancel != nil {
 		s.cancel()
 		s.cancel = nil
+	}
+}
+
+// SetFileHistorySavePath configures disk persistence for undo/redo history.
+func (s *Service) SetFileHistorySavePath(dir string) {
+	s.fileHistory.SetSavePath(dir)
+	// Try to load any existing history from disk
+	if s.fileHistory.Load() {
+		log.Printf("Loaded file history from %s", dir)
 	}
 }
 
@@ -736,10 +771,23 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 			s.emitFn("ai:stream:error", fmt.Sprintf("内部错误: %v", r))
 			setDone()
 		}
+		agentTools.SubAgentProgressFn = nil // clear progress callback
 		if !isDone() {
 			s.emitFn("ai:stream:done", "")
 		}
 	}()
+
+	// Wire up sub-agent progress reporting to frontend.
+	// Sub-agent progress events (ai:stream:data) reset the frontend's 4-minute
+	// stream timeout, so long-running sub-agents (up to 22 min) won't trigger
+	// false timeout errors as long as each round completes within 4 minutes.
+	agentTools.SubAgentProgressFn = func(round, maxRounds int, task string) {
+		preview := task
+		if len(preview) > 60 {
+			preview = preview[:60] + "..."
+		}
+		s.emitFn("ai:stream:data", fmt.Sprintf("\n🔄 子Agent进度 [%d/%d]: %s\n", round, maxRounds, preview))
+	}
 
 	var prevMsgCount int
 	var nudgeCount int
@@ -925,9 +973,9 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 				// Fall back to estimation
 				currentMsgs := currentReq.Messages
 				for i := prevMsgCount; i < len(currentMsgs) && i >= 0; i++ {
-					tokensIn += estimateTokens(currentMsgs[i].Content)
+					tokensIn += estimateTokensWithModel(currentMsgs[i].Content, currentReq.Model)
 				}
-				tokensOut = estimateTokens(assistantContent)
+				tokensOut = estimateTokensWithModel(assistantContent, currentReq.Model)
 			}
 			prevMsgCount = len(currentReq.Messages)
 
@@ -938,8 +986,8 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 					CachedTokens:     cachedTokens,
 				})
 				cacheSavings := provider.CalculateCacheSavings(currentReq.Model, &provider.TokenUsage{
-					PromptTokens:  tokensIn,
-					CachedTokens:  cachedTokens,
+					PromptTokens: tokensIn,
+					CachedTokens: cachedTokens,
 				})
 
 				usageEntry := &memory.TokenUsageEntry{
@@ -1025,16 +1073,67 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 					return
 				}
 
-			// If no tool calls were made, check if AI declared task done or nudge it
-			if !toolCallsSeen && assistantContent != "" {
-				s.progress.recordEmptyRound()
+				// If no tool calls were made, check if AI declared task done or nudge it
+				if !toolCallsSeen && assistantContent != "" {
+					s.progress.recordEmptyRound()
 
-				// Check if AI explicitly declared task completion — stop immediately
-				lowerContent := strings.ToLower(assistantContent)
-				explicitDone := strings.Contains(lowerContent, "任务已完成") ||
-					strings.Contains(lowerContent, "all tasks completed") ||
-					strings.Contains(lowerContent, "所有任务已完成")
-				if explicitDone {
+					// Check if AI explicitly declared task completion — stop immediately
+					lowerContent := strings.ToLower(assistantContent)
+					explicitDone := strings.Contains(lowerContent, "任务已完成") ||
+						strings.Contains(lowerContent, "all tasks completed") ||
+						strings.Contains(lowerContent, "所有任务已完成")
+					if explicitDone {
+						donePayload := map[string]interface{}{}
+						if streamUsage != nil {
+							donePayload["usage"] = streamUsage
+						}
+						s.emitFn("ai:stream:done", donePayload)
+						setDone()
+						return
+					}
+
+					maxNudges := s.progress.calculateMaxNudges()
+					// If model keeps outputting text without tools for 2+ rounds, stop immediately
+					// This model likely doesn't support function calling
+					if nudgeCount >= 2 {
+						s.emitFn("ai:stream:data", "\n\n*[系统: 模型连续未调用工具，可能不支持 function calling。建议切换到 GPT-4、Claude 或 Gemini 等支持工具调用的模型。]*")
+						donePayload := map[string]interface{}{}
+						if streamUsage != nil {
+							donePayload["usage"] = streamUsage
+						}
+						s.emitFn("ai:stream:done", donePayload)
+						setDone()
+						return
+					}
+					if nudgeCount < maxNudges {
+						nudgeCount++
+
+						// Build tool usage hint for models that don't generate tool_calls
+						toolHint := buildToolUsageHint(currentReq.Tools, assistantContent)
+
+						// Build adaptive nudge based on what's been tried
+						nudgeContent := fmt.Sprintf("你的回复中没有调用工具。你必须使用工具来完成任务，而不是只输出文字。")
+						if s.loopState.GetOriginalGoal() != "" {
+							nudgeContent += fmt.Sprintf("\n原始目标: %s\n", s.loopState.GetOriginalGoal())
+						}
+						if files := s.loopState.GetFilesTouched(); len(files) > 0 {
+							nudgeContent += fmt.Sprintf("已修改 %d 个文件: %s\n", len(files), strings.Join(files, ", "))
+						}
+						nudgeContent += toolHint
+
+						currentReq.Messages = append(currentReq.Messages, provider.Message{
+							Role:    "assistant",
+							Content: assistantContent,
+						})
+						currentReq.Messages = append(currentReq.Messages, provider.Message{
+							Role:    "user",
+							Content: nudgeContent,
+						})
+						s.emitFn("ai:stream:data", "\n\n*[系统: 等待工具调用...]*")
+						continue
+					}
+					// Nudge exhausted — emit done with warning
+					s.emitFn("ai:stream:data", "\n\n*[系统: 已达到最大提示次数，请手动发送「继续」以继续执行]*")
 					donePayload := map[string]interface{}{}
 					if streamUsage != nil {
 						donePayload["usage"] = streamUsage
@@ -1044,166 +1143,129 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 					return
 				}
 
-				maxNudges := s.progress.calculateMaxNudges()
-				// If model keeps outputting text without tools for 3+ rounds, stop immediately
-				// This prevents wasting tokens on models that don't support tool calling
-				if nudgeCount >= 3 {
-					s.emitFn("ai:stream:data", "\n\n*[系统: 模型连续3轮未调用工具，可能不支持工具调用。请切换到支持 function calling 的模型（如 GPT-4、Claude、Gemini）。]*")
-					donePayload := map[string]interface{}{}
-					if streamUsage != nil {
-						donePayload["usage"] = streamUsage
-					}
-					s.emitFn("ai:stream:done", donePayload)
-					setDone()
-					return
-				}
-				if nudgeCount < maxNudges {
-					nudgeCount++
-
-					// Build tool usage hint for models that don't generate tool_calls
-					toolHint := buildToolUsageHint(currentReq.Tools, assistantContent)
-
-					// Build adaptive nudge based on what's been tried
-					nudgeContent := fmt.Sprintf("你的回复中没有调用工具。你必须使用工具来完成任务，而不是只输出文字。")
-					if s.loopState.GetOriginalGoal() != "" {
-						nudgeContent += fmt.Sprintf("\n原始目标: %s\n", s.loopState.GetOriginalGoal())
-					}
-					if files := s.loopState.GetFilesTouched(); len(files) > 0 {
-						nudgeContent += fmt.Sprintf("已修改 %d 个文件: %s\n", len(files), strings.Join(files, ", "))
-					}
-					nudgeContent += toolHint
-
-					currentReq.Messages = append(currentReq.Messages, provider.Message{
-						Role:    "assistant",
-						Content: assistantContent,
-					})
-					currentReq.Messages = append(currentReq.Messages, provider.Message{
-						Role:    "user",
-						Content: nudgeContent,
-					})
-					s.emitFn("ai:stream:data", "\n\n*[系统: 等待工具调用...]*")
-					continue
-				}
-				// Nudge exhausted — emit done with warning
-				s.emitFn("ai:stream:data", "\n\n*[系统: 已达到最大提示次数，请手动发送「继续」以继续执行]*")
 				donePayload := map[string]interface{}{}
 				if streamUsage != nil {
 					donePayload["usage"] = streamUsage
 				}
 				s.emitFn("ai:stream:done", donePayload)
 				setDone()
+
+				// Learn user preferences from this conversation (async, non-blocking)
+				if s.memoryStore != nil && req.ProjectPath != "" {
+					go s.learnPreferences(req, assistantContent, toolCalls)
+				}
+
 				return
 			}
 
-			donePayload := map[string]interface{}{}
-			if streamUsage != nil {
-				donePayload["usage"] = streamUsage
+			assistantMsg := provider.Message{Role: "assistant", Content: assistantContent, Extra: accumulatedExtra}
+			if len(toolCalls) > 0 {
+				assistantMsg.ToolCalls = toolCalls
 			}
-			s.emitFn("ai:stream:done", donePayload)
-			setDone()
+			currentReq.Messages = append(currentReq.Messages, assistantMsg)
 
-			// Learn user preferences from this conversation (async, non-blocking)
-			if s.memoryStore != nil && req.ProjectPath != "" {
-				go s.learnPreferences(req, assistantContent, toolCalls)
+			// All tools execute automatically — mode already controls which tools are available.
+			s.progress.resetEmptyRounds()
+			var calls []agent.ToolCall
+			for _, tc := range toolCalls {
+				call := agent.ToolCall{
+					ID: tc.ID, Name: tc.Function.Name, Args: make(map[string]any),
+				}
+				if tc.Function.Arguments != "" {
+					json.Unmarshal([]byte(tc.Function.Arguments), &call.Args)
+				}
+				calls = append(calls, call)
 			}
 
-			return
-		}
+			agentTools.SetSubAgentProviderID(currentReq.ProviderID)
 
-		assistantMsg := provider.Message{Role: "assistant", Content: assistantContent, Extra: accumulatedExtra}
-		if len(toolCalls) > 0 {
-			assistantMsg.ToolCalls = toolCalls
-		}
-		currentReq.Messages = append(currentReq.Messages, assistantMsg)
-
-		// All tools execute automatically — mode already controls which tools are available.
-		s.progress.resetEmptyRounds()
-		var calls []agent.ToolCall
-		for _, tc := range toolCalls {
-			call := agent.ToolCall{
-				ID: tc.ID, Name: tc.Function.Name, Args: make(map[string]any),
+			// Inject parent agent context into sub-agents so they know what's been done
+			if parentSummary := s.loopState.ProjectStateSummary(); parentSummary != "" {
+				agentTools.SubAgentParentContext = parentSummary
 			}
-			if tc.Function.Arguments != "" {
-				json.Unmarshal([]byte(tc.Function.Arguments), &call.Args)
-			}
-			calls = append(calls, call)
-		}
 
-		agentTools.SetSubAgentProviderID(currentReq.ProviderID)
-
-		// Record tool calls for repetition detection
-		for _, call := range calls {
-			s.loopState.RecordToolCall(call.Name, call.Args, loop+1)
-		}
-
-		if len(calls) > 0 {
-			type toolRes struct {
-				call   agent.ToolCall
-				result *agent.ToolResult
-				err    error
-			}
-			ch := make(chan toolRes, len(calls))
+			// Record tool calls for repetition detection
 			for _, call := range calls {
-				emitData := map[string]any{
-					"id": call.ID, "name": call.Name, "args": call.Args, "loop": loop + 1,
-				}
-				if meta := extractFileMeta(call.Name, call.Args); meta != nil {
-					emitData["fileMeta"] = meta
-				}
-				s.emitFn("ai:stream:tool_call", emitData)
-				// Check if this tool needs approval
-				needsApproval := false
-				if t, ok := s.toolExec.Get(call.Name); ok {
-					needsApproval = t.RequiresApproval() && !s.toolExec.IsAutoApproved(call.Name)
-				}
-				if needsApproval {
-					s.emitFn("ai:stream:tool_approval", map[string]any{
-						"id": call.ID, "name": call.Name, "args": call.Args,
-					})
-				}
-				go func(c agent.ToolCall) {
-					timeout := 60 * time.Second
-					if c.Name == "ask_user" {
-						timeout = 6 * time.Minute
-					}
-					if t, ok := s.toolExec.Get(c.Name); ok && t.RequiresApproval() {
-						timeout = 6 * time.Minute // allow time for user to approve
-					}
-					r, e := executeToolWithTimeout(ctx, s.toolExec, c, timeout)
-					ch <- toolRes{c, r, e}
-				}(call)
+				s.loopState.RecordToolCall(call.Name, call.Args, loop+1)
 			}
-			for i := 0; i < len(calls); i++ {
-				tr := <-ch
-				if tr.err != nil {
-					errData := map[string]string{"callId": tr.call.ID, "name": tr.call.Name, "error": tr.err.Error()}
-					s.emitFn("ai:stream:tool_result", errData)
-					currentReq.Messages = append(currentReq.Messages, provider.Message{Role: "tool", Content: fmt.Sprintf("Error: %s", tr.err.Error()), ToolCallID: tr.call.ID, Name: tr.call.Name})
-				} else {
-					if tr.result.FileMeta != nil {
-						resultMap := map[string]any{
-							"callId":   tr.result.CallID,
-							"name":     tr.result.Name,
-							"result":   tr.result.Result,
-							"fileMeta": tr.result.FileMeta,
+
+			if len(calls) > 0 {
+				type toolRes struct {
+					call   agent.ToolCall
+					result *agent.ToolResult
+					err    error
+				}
+				ch := make(chan toolRes, len(calls))
+				for _, call := range calls {
+					emitData := map[string]any{
+						"id": call.ID, "name": call.Name, "args": call.Args, "loop": loop + 1,
+					}
+					if meta := extractFileMeta(call.Name, call.Args); meta != nil {
+						emitData["fileMeta"] = meta
+					}
+					s.emitFn("ai:stream:tool_call", emitData)
+					// Check if this tool needs approval
+					needsApproval := false
+					if t, ok := s.toolExec.Get(call.Name); ok {
+						needsApproval = t.RequiresApproval() && !s.toolExec.IsAutoApproved(call.Name)
+					}
+					if needsApproval {
+						s.emitFn("ai:stream:tool_approval", map[string]any{
+							"id": call.ID, "name": call.Name, "args": call.Args,
+						})
+					}
+					go func(c agent.ToolCall) {
+						timeout := 60 * time.Second
+						if c.Name == "ask_user" {
+							timeout = 6 * time.Minute
 						}
-						s.emitFn("ai:stream:tool_result", resultMap)
-					} else {
-						s.emitFn("ai:stream:tool_result", tr.result)
-					}
-					rc := tr.result.Result
-					if len(rc) > maxToolResultChars {
-						rc = rc[:maxToolResultChars] + "... [truncated]"
-					}
-					currentReq.Messages = append(currentReq.Messages, provider.Message{Role: "tool", Content: rc, ToolCallID: tr.call.ID, Name: tr.call.Name})
-					// Track progress
-					filePath := ""
-					if tr.result.FileMeta != nil {
-						filePath = tr.result.FileMeta.FilePath
-					}
-					s.progress.recordToolCall(tr.call.Name, true, filePath)
+						if t, ok := s.toolExec.Get(c.Name); ok && t.RequiresApproval() {
+							timeout = 6 * time.Minute // allow time for user to approve
+						}
+						r, e := executeToolWithTimeout(ctx, s.toolExec, c, timeout)
+						ch <- toolRes{c, r, e}
+					}(call)
 				}
-			}
+				toolFailures := 0
+				for i := 0; i < len(calls); i++ {
+					tr := <-ch
+					if tr.err != nil {
+						toolFailures++
+						errData := map[string]string{"callId": tr.call.ID, "name": tr.call.Name, "error": tr.err.Error()}
+						s.emitFn("ai:stream:tool_result", errData)
+						currentReq.Messages = append(currentReq.Messages, provider.Message{Role: "tool", Content: fmt.Sprintf("Error: %s", tr.err.Error()), ToolCallID: tr.call.ID, Name: tr.call.Name})
+					} else {
+						if tr.result.FileMeta != nil {
+							resultMap := map[string]any{
+								"callId":   tr.result.CallID,
+								"name":     tr.result.Name,
+								"result":   tr.result.Result,
+								"fileMeta": tr.result.FileMeta,
+							}
+							s.emitFn("ai:stream:tool_result", resultMap)
+						} else {
+							s.emitFn("ai:stream:tool_result", tr.result)
+						}
+						rc := tr.result.Result
+						estimatedUsed := estimateContextUsed(currentReq.Messages)
+						budget := calcToolResultBudget(estimatedUsed, 100000)
+						rc = smartTruncateToolResult(tr.call.Name, rc, budget)
+						currentReq.Messages = append(currentReq.Messages, provider.Message{Role: "tool", Content: rc, ToolCallID: tr.call.ID, Name: tr.call.Name})
+						// Track progress
+						filePath := ""
+						if tr.result.FileMeta != nil {
+							filePath = tr.result.FileMeta.FilePath
+						}
+						s.progress.recordToolCall(tr.call.Name, true, filePath)
+					}
+				}
+
+				// Circuit breaker: if ALL tool calls in this round failed, record a failure
+				if toolFailures > 0 && toolFailures == len(calls) {
+					s.cb.RecordFailure()
+				} else if len(calls) > 0 {
+					s.cb.RecordSuccess()
+				}
 			}
 		}
 
@@ -1575,11 +1637,16 @@ func (p *AgentProgress) getProgressSummary() string {
 }
 
 // pruneMessages keeps system messages + the most recent messages to prevent context overflow.
-// System messages (role=system) are always preserved. Recent messages are kept to maintain continuity.
+// System messages are trimmed too: first keepSystemPrefix (stable cache prefix) and
+// last keepSystemSuffix (recent state updates) are preserved; middle system messages are dropped.
+// This prevents accumulation of outdated compression markers, state summaries, etc.
 func pruneMessages(msgs []provider.Message, keepRecent int) []provider.Message {
 	if len(msgs) <= keepRecent {
 		return msgs
 	}
+
+	const keepSystemPrefix = 6 // stable prefix: Rules, Structure, Knowledge, RAG, ContextFiles, ActiveFile
+	const keepSystemSuffix = 4 // recent state: project state, anti-drift, compression markers, verify results
 
 	var systemMsgs []provider.Message
 	var otherMsgs []provider.Message
@@ -1597,15 +1664,30 @@ func pruneMessages(msgs []provider.Message, keepRecent int) []provider.Message {
 		otherMsgs = otherMsgs[len(otherMsgs)-keepRecent:]
 	}
 
+	// Trim system messages: keep prefix + suffix, drop middle duplicates
+	var trimmedSystem []provider.Message
+	if len(systemMsgs) > keepSystemPrefix+keepSystemSuffix {
+		trimmedSystem = append(trimmedSystem, systemMsgs[:keepSystemPrefix]...)
+		// Insert a marker for dropped system messages
+		dropped := len(systemMsgs) - keepSystemPrefix - keepSystemSuffix
+		trimmedSystem = append(trimmedSystem, provider.Message{
+			Role:    "system",
+			Content: fmt.Sprintf("[已省略 %d 条中间系统消息以节省上下文]", dropped),
+		})
+		trimmedSystem = append(trimmedSystem, systemMsgs[len(systemMsgs)-keepSystemSuffix:]...)
+	} else {
+		trimmedSystem = systemMsgs
+	}
+
 	// Reconstruct: system messages first, then recent messages
-	result := make([]provider.Message, 0, len(systemMsgs)+len(otherMsgs)+1)
-	result = append(result, systemMsgs...)
+	result := make([]provider.Message, 0, len(trimmedSystem)+len(otherMsgs)+1)
+	result = append(result, trimmedSystem...)
 
 	// Add a summary marker if we pruned messages
 	if len(msgs) > keepRecent+len(systemMsgs) {
 		result = append(result, provider.Message{
 			Role:    "system",
-			Content: fmt.Sprintf("[上下文已压缩：保留了最近 %d 条消息和所有系统消息]", keepRecent),
+			Content: fmt.Sprintf("[上下文已压缩：保留了最近 %d 条消息]", keepRecent),
 		})
 	}
 
