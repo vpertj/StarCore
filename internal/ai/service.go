@@ -111,6 +111,8 @@ type Service struct {
 
 	// Agent loop progress tracker
 	progress *AgentProgress
+
+	intentClassifier *agent.IntentClassifier
 }
 
 // AgentProgress tracks progress within a single agent loop session.
@@ -144,23 +146,24 @@ func NewService(
 	ls := agentTools.NewLoopState()
 	agentTools.LoopStateRef = ls
 	return &Service{
-		providerMgr:     providerMgr,
-		toolExec:        toolExec,
-		memoryStore:     memoryStore,
-		agentReg:        agentReg,
-		emitFn:          emitFn,
-		buildContext:    buildContext,
-		compress:        compress,
-		contextWindow:   contextWindow,
-		contextWindowFn: contextWindow,
-		appCtx:          appCtx,
-		loopState:       ls,
-		verifyFn:        verifyFn,
-		continueCh:      make(chan int, 1),
-		cb:              NewCircuitBreaker(10, 60*time.Second),
-		sem:             make(chan struct{}, 3),
-		fileHistory:     agentTools.NewFileHistory(),
-		progress:        newAgentProgress(),
+		providerMgr:      providerMgr,
+		toolExec:         toolExec,
+		memoryStore:      memoryStore,
+		agentReg:         agentReg,
+		emitFn:           emitFn,
+		buildContext:     buildContext,
+		compress:         compress,
+		contextWindow:    contextWindow,
+		contextWindowFn:  contextWindow,
+		appCtx:           appCtx,
+		loopState:        ls,
+		verifyFn:         verifyFn,
+		continueCh:       make(chan int, 1),
+		cb:               NewCircuitBreaker(10, 60*time.Second),
+		sem:              make(chan struct{}, 3),
+		fileHistory:      agentTools.NewFileHistory(),
+		progress:         newAgentProgress(),
+		intentClassifier: agent.NewIntentClassifier(),
 	}
 }
 
@@ -457,6 +460,20 @@ func (s *Service) ChatStream(req provider.ChatRequest) error {
 	if err := preCheckProvider(s.providerMgr, req.ProviderID); err != nil {
 		s.emitFn("ai:stream:error", err.Error())
 		return err
+	}
+
+	var intent *agent.IntentResult
+	if len(req.Messages) > 0 {
+		for i := len(req.Messages) - 1; i >= 0; i-- {
+			if req.Messages[i].Role == "user" {
+				intent = s.intentClassifier.Classify(req.Messages[i].Content)
+				break
+			}
+		}
+	}
+
+	if intent != nil {
+		s.loopState.SetDetectedIntent(intent)
 	}
 
 	if req.AgentID != "" {
