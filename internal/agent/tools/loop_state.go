@@ -51,6 +51,9 @@ type LoopState struct {
 	FileModCounts map[string]int // per-file modification counts
 	MaxFileMods   int            // max modifications per file before warning (default 10)
 
+	// Per-tool consecutive failure tracking
+	ToolFailures map[string]int
+
 	DetectedIntent *agent.IntentResult
 }
 
@@ -60,6 +63,7 @@ func NewLoopState() *LoopState {
 		MaxHistory:    30,
 		FileModCounts: make(map[string]int),
 		MaxFileMods:   10,
+		ToolFailures:  make(map[string]int),
 	}
 }
 
@@ -80,6 +84,7 @@ func (s *LoopState) Reset() {
 	s.ToolCallsThisRound = 0
 	s.FilesModifiedThisRound = 0
 	s.FileModCounts = make(map[string]int)
+	s.ToolFailures = make(map[string]int)
 	s.DetectedIntent = nil
 }
 
@@ -242,6 +247,24 @@ func (s *LoopState) GetStagnantRounds() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.StagnantRounds
+}
+
+func (s *LoopState) RecordToolFailure(toolName string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ToolFailures[toolName]++
+}
+
+func (s *LoopState) ResetToolFailure(toolName string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.ToolFailures, toolName)
+}
+
+func (s *LoopState) GetConsecutiveFailures(toolName string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ToolFailures[toolName]
 }
 
 func (s *LoopState) SetDetectedIntent(intent *agent.IntentResult) {
