@@ -1,6 +1,9 @@
 package agent
 
-import "sync"
+import (
+	"sort"
+	"sync"
+)
 
 type Registry struct {
 	agents map[string]AgentDef
@@ -46,4 +49,46 @@ func (r *Registry) ListByCategory(category string) []AgentDef {
 		}
 	}
 	return result
+}
+
+func (r *Registry) FindByIntent(intent IntentType) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var bestAgent string
+	bestPriority := -1
+
+	for _, a := range r.agents {
+		for _, cap := range a.Capabilities {
+			if cap == intent && a.Priority > bestPriority {
+				bestAgent = a.ID
+				bestPriority = a.Priority
+			}
+		}
+	}
+	return bestAgent
+}
+
+func (r *Registry) SuggestAgents(intent IntentType, topN int) []AgentDef {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var matched []AgentDef
+	for _, a := range r.agents {
+		for _, cap := range a.Capabilities {
+			if cap == intent {
+				matched = append(matched, a)
+				break
+			}
+		}
+	}
+
+	sort.Slice(matched, func(i, j int) bool {
+		return matched[i].Priority > matched[j].Priority
+	})
+
+	if len(matched) > topN {
+		matched = matched[:topN]
+	}
+	return matched
 }
