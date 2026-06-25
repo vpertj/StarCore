@@ -919,8 +919,9 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 		var streamUsage *provider.TokenUsage
 
 		// Streaming-level repetition detection thresholds
-		const maxTextWithoutTools = 3000    // Max chars of text before forcing tool call
-		const repetitionCheckInterval = 500 // Check for repetition every N chars
+		const maxTextWithoutTools = 1500    // Max chars of text before forcing tool call (lowered from 3000)
+		const repetitionCheckInterval = 200 // Check for repetition every N chars (lowered from 500)
+		const repetitionThreshold = 2       // Trigger after 2 repetitions (lowered from 3)
 
 		for event := range eventCh {
 			streamReceivedAny = true
@@ -939,8 +940,8 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 					}
 
 					// Check 2: Repetition detection - same phrases appearing multiple times
-					if len(assistantContent) > repetitionCheckInterval && len(assistantContent)%repetitionCheckInterval < 100 {
-						if detectTextRepetition(assistantContent) {
+					if len(assistantContent) > repetitionCheckInterval {
+						if detectTextRepetitionN(assistantContent, repetitionThreshold) {
 							streamInterrupted = true
 							s.emitFn("ai:stream:data", "\n\n*[系统: 检测到重复输出，正在中断并重新引导...]*")
 							roundCancel()
@@ -1901,7 +1902,13 @@ func parseKeyValueArgs(s string) map[string]any {
 // detectTextRepetition checks if the assistant's output contains repetitive phrases.
 // Returns true if the same phrase (>=20 chars) appears 3+ times.
 func detectTextRepetition(content string) bool {
-	if len(content) < 200 {
+	return detectTextRepetitionN(content, 3)
+}
+
+// detectTextRepetitionN checks if the assistant's output contains repetitive phrases.
+// Returns true if the same phrase (>=15 chars) appears threshold+ times.
+func detectTextRepetitionN(content string, threshold int) bool {
+	if len(content) < 100 {
 		return false
 	}
 
@@ -1911,9 +1918,9 @@ func detectTextRepetition(content string) bool {
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if len(line) >= 20 {
+		if len(line) >= 15 {
 			lineCounts[line]++
-			if lineCounts[line] >= 3 {
+			if lineCounts[line] >= threshold {
 				return true
 			}
 		}
@@ -1925,9 +1932,25 @@ func detectTextRepetition(content string) bool {
 
 	for _, sent := range sentences {
 		sent = strings.TrimSpace(sent)
-		if len(sent) >= 20 {
+		if len(sent) >= 15 {
 			sentenceCounts[sent]++
-			if sentenceCounts[sent] >= 3 {
+			if sentenceCounts[sent] >= threshold {
+				return true
+			}
+		}
+	}
+
+	// Check for repeated phrase prefixes (first 30 chars of each sentence)
+	phrasePrefixes := make(map[string]int)
+	for _, sent := range sentences {
+		sent = strings.TrimSpace(sent)
+		if len(sent) >= 10 {
+			prefix := sent
+			if len(prefix) > 30 {
+				prefix = prefix[:30]
+			}
+			phrasePrefixes[prefix]++
+			if phrasePrefixes[prefix] >= threshold {
 				return true
 			}
 		}
