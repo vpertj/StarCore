@@ -114,6 +114,7 @@ type Service struct {
 
 	intentClassifier *agent.IntentClassifier
 	toolRouter       *agent.ToolRouter
+	taskRouter       *TaskRouter
 }
 
 // AgentProgress tracks progress within a single agent loop session.
@@ -166,6 +167,7 @@ func NewService(
 		progress:         newAgentProgress(),
 		intentClassifier: agent.NewIntentClassifier(),
 		toolRouter:       agent.NewToolRouter(),
+		taskRouter:       NewTaskRouter(),
 	}
 }
 
@@ -484,6 +486,16 @@ func (s *Service) ChatStream(req provider.ChatRequest) error {
 			s.emitFn("ai:agent:suggested", map[string]any{
 				"agentID": suggestedAgent,
 				"intent":  string(intent.Intent),
+			})
+		}
+	}
+
+	if intent != nil {
+		route := s.taskRouter.Route(req.Messages, intent)
+		if route.Route == "decompose" && len(route.SubTasks) > 0 {
+			s.emitFn("ai:task:decomposed", map[string]any{
+				"complexity": int(route.Complexity),
+				"subtasks":   len(route.SubTasks),
 			})
 		}
 	}
@@ -1386,6 +1398,13 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 			currentReq.Messages = append(currentReq.Messages, provider.Message{
 				Role:    "system",
 				Content: "⚠️ 已连续5轮无实质进展（无工具调用或文件修改）。请：1) 回顾原始目标；2) 分析当前卡在哪里；3) 尝试完全不同的方法；4) 如果无法继续，总结已完成的工作并结束。",
+			})
+		}
+
+		if loop == 10 && s.progress != nil && len(s.progress.filesModified) > 8 {
+			s.emitFn("ai:task:complexity_warning", map[string]any{
+				"message":       "任务涉及大量文件修改，建议拆分为多个子任务以提高效率",
+				"filesModified": len(s.progress.filesModified),
 			})
 		}
 
