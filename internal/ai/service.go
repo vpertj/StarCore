@@ -914,14 +914,41 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 		toolCallsSeen := false
 		streamReceivedAny := false
 		streamRetryCount := 0
+		streamInterrupted := false
 
 		var streamUsage *provider.TokenUsage
+
+		// Streaming-level repetition detection thresholds
+		const maxTextWithoutTools = 3000    // Max chars of text before forcing tool call
+		const repetitionCheckInterval = 500 // Check for repetition every N chars
 
 		for event := range eventCh {
 			streamReceivedAny = true
 			switch event.Type {
 			case "data":
 				assistantContent += event.Content
+
+				// Streaming-level interrupt: detect planning loops and repetition
+				if !toolCallsSeen && !streamInterrupted {
+					// Check 1: Text length threshold - model is outputting too much without tools
+					if len(assistantContent) > maxTextWithoutTools {
+						streamInterrupted = true
+						s.emitFn("ai:stream:data", "\n\n*[系统: 检测到模型输出大量文本但未调用工具，正在中断并重新引导...]*")
+						roundCancel()
+						break
+					}
+
+					// Check 2: Repetition detection - same phrases appearing multiple times
+					if len(assistantContent) > repetitionCheckInterval && len(assistantContent)%repetitionCheckInterval < 100 {
+						if detectTextRepetition(assistantContent) {
+							streamInterrupted = true
+							s.emitFn("ai:stream:data", "\n\n*[系统: 检测到重复输出，正在中断并重新引导...]*")
+							roundCancel()
+							break
+						}
+					}
+				}
+
 				s.emitFn("ai:stream:data", event.Content)
 			case "thinking":
 				reasoningContent += event.Content
@@ -998,6 +1025,32 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 					// (the post-loop no-tool-calls check handles it)
 				}
 			}
+		}
+
+		// If stream was interrupted due to repetition or length threshold,
+		// force tool-call nudge immediately without further processing
+		if streamInterrupted && !toolCallsSeen {
+			s.progress.recordEmptyRound()
+			nudgeCount++
+			nudgeContent := "你的输出被中断了，因为检测到重复内容或过长文本但未调用工具。你必须立即使用工具开始工作，不要输出规划性文本。"
+			if s.loopState.GetOriginalGoal() != "" {
+				nudgeContent += fmt.Sprintf("\n原始目标: %s\n", s.loopState.GetOriginalGoal())
+			}
+			if intent := s.loopState.GetDetectedIntent(); intent != nil {
+				if suggestion := s.toolRouter.SuggestTools(s.loopState.GetOriginalGoal()); suggestion != nil {
+					nudgeContent += fmt.Sprintf("\n建议使用的工具: %s\n%s", suggestion.PrimaryTool, suggestion.Hint)
+				}
+			}
+			nudgeContent += buildToolUsageHint(currentReq.Tools, "")
+			currentReq.Messages = append(currentReq.Messages, provider.Message{
+				Role:    "assistant",
+				Content: assistantContent,
+			})
+			currentReq.Messages = append(currentReq.Messages, provider.Message{
+				Role:    "user",
+				Content: nudgeContent,
+			})
+			continue
 		}
 
 		// Record token usage for THIS round only (delta, not cumulative history)
@@ -1843,4 +1896,42 @@ func parseKeyValueArgs(s string) map[string]any {
 		}
 	}
 	return args
+}
+
+// detectTextRepetition checks if the assistant's output contains repetitive phrases.
+// Returns true if the same phrase (>=20 chars) appears 3+ times.
+func detectTextRepetition(content string) bool {
+	if len(content) < 200 {
+		return false
+	}
+
+	// Split into lines and check for repeated line patterns
+	lines := strings.Split(content, "\n")
+	lineCounts := make(map[string]int)
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if len(line) >= 20 {
+			lineCounts[line]++
+			if lineCounts[line] >= 3 {
+				return true
+			}
+		}
+	}
+
+	// Check for repeated sentence patterns (split by Chinese/English punctuation)
+	sentences := regexp.MustCompile(`[。！？.!?\n]+`).Split(content, -1)
+	sentenceCounts := make(map[string]int)
+
+	for _, sent := range sentences {
+		sent = strings.TrimSpace(sent)
+		if len(sent) >= 20 {
+			sentenceCounts[sent]++
+			if sentenceCounts[sent] >= 3 {
+				return true
+			}
+		}
+	}
+
+	return false
 }

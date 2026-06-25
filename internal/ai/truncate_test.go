@@ -78,3 +78,32 @@ func TestTruncateHeadTail(t *testing.T) {
 		t.Error("expected omission marker")
 	}
 }
+
+func TestDetectTextRepetition_RepeatedLines(t *testing.T) {
+	content := strings.Repeat("好的，我来全面审查你的项目\n", 5)
+	if !detectTextRepetition(content) {
+		t.Error("expected repetition detected for repeated lines")
+	}
+}
+
+func TestDetectTextRepetition_RepeatedSentences(t *testing.T) {
+	// Need > 200 chars total for detection to kick in
+	content := strings.Repeat("好的，我来全面审查你的项目，先看看整体结构。", 6)
+	if !detectTextRepetition(content) {
+		t.Error("expected repetition detected for repeated sentences")
+	}
+}
+
+func TestDetectTextRepetition_NoRepetition(t *testing.T) {
+	content := "这是一段正常的技术分析文本，包含不同内容。每句话都不一样。没有重复。"
+	if detectTextRepetition(content) {
+		t.Error("expected no repetition for normal text")
+	}
+}
+
+func TestDetectTextRepetition_TooShort(t *testing.T) {
+	content := "短文本"
+	if detectTextRepetition(content) {
+		t.Error("expected no repetition for short text")
+	}
+}
