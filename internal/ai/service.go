@@ -1906,19 +1906,20 @@ func detectTextRepetition(content string) bool {
 }
 
 // detectTextRepetitionN checks if the assistant's output contains repetitive phrases.
-// Returns true if the same phrase (>=15 chars) appears threshold+ times.
+// Returns true if the same phrase appears threshold+ times.
+// Uses three strategies: exact line match, exact sentence match, and N-gram prefix match.
 func detectTextRepetitionN(content string, threshold int) bool {
-	if len(content) < 100 {
+	if len(content) < 80 {
 		return false
 	}
 
-	// Split into lines and check for repeated line patterns
+	// Strategy 1: Exact line repetition
 	lines := strings.Split(content, "\n")
 	lineCounts := make(map[string]int)
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if len(line) >= 15 {
+		if len(line) >= 10 {
 			lineCounts[line]++
 			if lineCounts[line] >= threshold {
 				return true
@@ -1926,13 +1927,13 @@ func detectTextRepetitionN(content string, threshold int) bool {
 		}
 	}
 
-	// Check for repeated sentence patterns (split by Chinese/English punctuation)
+	// Strategy 2: Exact sentence repetition (split by punctuation)
 	sentences := regexp.MustCompile(`[。！？.!?\n]+`).Split(content, -1)
 	sentenceCounts := make(map[string]int)
 
 	for _, sent := range sentences {
 		sent = strings.TrimSpace(sent)
-		if len(sent) >= 15 {
+		if len(sent) >= 10 {
 			sentenceCounts[sent]++
 			if sentenceCounts[sent] >= threshold {
 				return true
@@ -1940,17 +1941,31 @@ func detectTextRepetitionN(content string, threshold int) bool {
 		}
 	}
 
-	// Check for repeated phrase prefixes (first 30 chars of each sentence)
-	phrasePrefixes := make(map[string]int)
+	// Strategy 3: N-gram prefix detection — catches variant phrases
+	// e.g., "好的，我来全面审查" and "好的，我来全面检查" share prefix "好的，我来"
+	prefixCounts := make(map[string]int)
 	for _, sent := range sentences {
 		sent = strings.TrimSpace(sent)
-		if len(sent) >= 10 {
-			prefix := sent
-			if len(prefix) > 30 {
-				prefix = prefix[:30]
+		if len([]rune(sent)) >= 5 {
+			// Use first 5 chars as prefix (catches "好的，我来" variants)
+			prefix := string([]rune(sent)[:5])
+			prefixCounts[prefix]++
+			if prefixCounts[prefix] >= threshold {
+				return true
 			}
-			phrasePrefixes[prefix]++
-			if phrasePrefixes[prefix] >= threshold {
+		}
+	}
+
+	// Strategy 4: Sliding window N-gram detection
+	// Check if any 8-char substring appears threshold+ times
+	runes := []rune(content)
+	if len(runes) >= 16 {
+		ngramCounts := make(map[string]int)
+		ngramSize := 8
+		for i := 0; i <= len(runes)-ngramSize; i++ {
+			ngram := string(runes[i : i+ngramSize])
+			ngramCounts[ngram]++
+			if ngramCounts[ngram] >= threshold {
 				return true
 			}
 		}

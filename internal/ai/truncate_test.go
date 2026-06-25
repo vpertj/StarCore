@@ -107,3 +107,21 @@ func TestDetectTextRepetition_TooShort(t *testing.T) {
 		t.Error("expected no repetition for short text")
 	}
 }
+
+func TestDetectTextRepetition_VariantPhrases(t *testing.T) {
+	// This simulates the real-world "planning loop" where the model
+	// outputs slightly different variants of the same phrase
+	content := "好的，我来全面审查你的项目。好的，我来全面检查你的项目。" +
+		"好的，让我全面了解一下项目的结构。好的，我来全面审视你的项目。"
+	if !detectTextRepetitionN(content, 2) {
+		t.Error("expected repetition detected for variant phrases")
+	}
+}
+
+func TestDetectTextRepetition_PrefixMatch(t *testing.T) {
+	// Model outputs "好的，我来..." variants - should be caught by prefix detection
+	content := "好的，我来审查项目。好的，我来检查代码。好的，我来分析结构。"
+	if !detectTextRepetitionN(content, 2) {
+		t.Error("expected prefix repetition detected")
+	}
+}
