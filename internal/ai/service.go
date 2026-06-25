@@ -1000,30 +1000,45 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 		var streamUsage *provider.TokenUsage
 
 		// Streaming-level repetition detection thresholds
-		const maxTextWithoutTools = 4000    // Max chars of text before forcing tool call (was 1500)
-		const repetitionCheckInterval = 200 // Check for repetition every N chars
-		const repetitionThreshold = 3       // Trigger after 3 repetitions
+		const maxTextWithoutTools = 2000    // Max chars of text before forcing tool call
+		const repetitionCheckInterval = 100 // Check for repetition every N chars
+		const repetitionThreshold = 2       // Trigger after 2 repetitions
 
 		// In chat/plan mode or when tools are suppressed, text-only responses are fine
 		chatMode := mode == "chat" || mode == "plan" || (mode == "build" && isSimpleMessage(req.Messages))
 
-		// Check if user message is non-technical (greeting, thanks, general questions) — skip repetition detection
+		// Check if user message is purely non-technical (greeting, thanks) — skip repetition detection
+		// Must match the ENTIRE message pattern, not just contain a keyword
 		isNonTechMsg := false
 		{
 			lastUMsg := ""
 			for i := len(currentReq.Messages) - 1; i >= 0; i-- {
 				if currentReq.Messages[i].Role == "user" {
-					lastUMsg = strings.ToLower(currentReq.Messages[i].Content)
+					lastUMsg = strings.TrimSpace(currentReq.Messages[i].Content)
 					break
 				}
 			}
-			nonTechKws := []string{"你好", "hello", "hi ", "嗨", "hey", "谢谢", "thanks", "再见", "bye",
-				"怎么样", "如何", "有没有", "能不能", "可以吗", "帮我看看", "你看看",
-				"介绍一下", "说说", "聊聊", "怎么样", "what do you think", "any issues"}
-			for _, kw := range nonTechKws {
-				if strings.Contains(lastUMsg, kw) {
+			// Only skip for very short, purely social messages
+			lower := strings.ToLower(lastUMsg)
+			nonTechPatterns := []string{
+				"^你好$", "^hello$", "^hi$", "^嗨$", "^hey$",
+				"^谢谢$", "^thanks$", "^thank you$", "^再见$", "^bye$",
+				"^你好[！!]*$", "^hello[!]*$",
+			}
+			for _, pattern := range nonTechPatterns {
+				if matched, _ := regexp.MatchString(pattern, lower); matched {
 					isNonTechMsg = true
 					break
+				}
+			}
+			// Also match very short messages (<=6 chars) that are clearly social
+			if !isNonTechMsg && len([]rune(lastUMsg)) <= 6 {
+				shortKws := []string{"你好", "hello", "hi", "嗨", "hey", "谢谢", "thanks", "bye", "再见"}
+				for _, kw := range shortKws {
+					if strings.Contains(lower, kw) {
+						isNonTechMsg = true
+						break
+					}
 				}
 			}
 		}
@@ -2056,7 +2071,7 @@ func detectTextRepetition(content string) bool {
 // Returns true if the same phrase appears threshold+ times.
 // Uses three strategies: exact line match, exact sentence match, and N-gram prefix match.
 func detectTextRepetitionN(content string, threshold int) bool {
-	if len(content) < 80 {
+	if len([]rune(content)) < 30 {
 		return false
 	}
 
