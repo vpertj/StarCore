@@ -284,12 +284,15 @@ func isSimpleMessage(msgs []provider.Message) bool {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Role == "user" {
 			trimmed := strings.TrimSpace(msgs[i].Content)
-			if len(trimmed) > 10 {
+			if len(trimmed) > 50 {
 				return false
 			}
 			lower := strings.ToLower(trimmed)
 			techIndicators := []string{"fix", "add", "refactor", "write", "create", "implement", "test", "deploy", "build",
-				"修复", "添加", "重构", "写", "创建", "实现", "测试", "部署", "构建", "改", "删", "优化"}
+				"修复", "添加", "重构", "写", "创建", "实现", "测试", "部署", "构建", "改", "删", "优化",
+				"read", "search", "edit", "analyze", "run", "install", "config", "debug", "compile",
+				"读取", "搜索", "修改", "分析", "运行", "安装", "配置", "调试", "编译",
+				"问题", "错误", "bug", "报错", "改进", "建议", "审查", "检查"}
 			for _, kw := range techIndicators {
 				if strings.Contains(lower, kw) {
 					return false
@@ -316,12 +319,15 @@ func buildToolSuppressHint(msgs []provider.Message) string {
 		return ""
 	}
 	trimmed := strings.TrimSpace(lastUserMsg)
-	if len(trimmed) > 10 {
+	if len(trimmed) > 50 {
 		return ""
 	}
 	lower := strings.ToLower(trimmed)
 	techIndicators := []string{"fix", "add", "refactor", "write", "create", "implement", "test", "deploy", "build",
-		"修复", "添加", "重构", "写", "创建", "实现", "测试", "部署", "构建", "改", "删", "优化"}
+		"修复", "添加", "重构", "写", "创建", "实现", "测试", "部署", "构建", "改", "删", "优化",
+		"read", "search", "edit", "analyze", "run", "install", "config", "debug", "compile",
+		"读取", "搜索", "修改", "分析", "运行", "安装", "配置", "调试", "编译",
+		"问题", "错误", "bug", "报错", "改进", "建议", "审查", "检查"}
 	for _, kw := range techIndicators {
 		if strings.Contains(lower, kw) {
 			return ""
@@ -354,6 +360,13 @@ const buildModePrompt = `
 === 构建模式 ===
 ❗ 核心规则：你必须使用工具完成任务。只输出文字而不调用工具是错误的行为。
 
+## 严格禁令 — 违反将导致任务失败
+- 绝对不要输出前言式文本（如"好的，我来审查..."、"让我分析一下..."）
+- 绝对不要列出你将采取的步骤
+- 绝对不要描述你即将做什么
+- 直接调用工具开始工作，不要有任何前置文字
+- 每次回复必须以 [TOOL: 开头或直接以 function calling 格式开始
+
 ## 工具调用方式
 如果模型支持 function calling，使用工具调用格式。
 如果不支持，在回复中使用以下格式（每个工具调用单独一行）：
@@ -383,6 +396,13 @@ const planModePrompt = `
 === 规划模式 ===
 ❗ 核心规则：你必须使用工具读取文件来分析。只输出文字而不读取文件是错误的行为。
 
+## 严格禁令 — 违反将导致任务失败
+- 绝对不要输出前言式文本（如"好的，我来审查..."、"让我分析一下..."）
+- 绝对不要列出你将采取的步骤
+- 绝对不要描述你即将做什么
+- 直接调用工具开始工作，不要有任何前置文字
+- 每次回复必须以 [TOOL: 开头或直接以 function calling 格式开始
+
 ## 工具调用方式
 如果模型支持 function calling，使用工具调用格式。
 如果不支持，在回复中使用以下格式：
@@ -400,11 +420,31 @@ const planModePrompt = `
 - 禁止使用 write_file、execute_command
 `
 
+// --- 构建模式（简单消息）---
+// 用于问候、感谢等非技术消息 — 简短直接回复，不需要工具。
+const buildModePromptSimple = `
+=== 构建模式 ===
+用户发送了简单的问候或非技术消息。直接简短回复，不需要调用任何工具。
+`
+
+// --- 规划模式（简单消息）---
+const planModePromptSimple = `
+=== 规划模式 ===
+用户发送了简单的问候或非技术消息。直接简短回复，不需要调用任何工具。
+`
+
 // --- 对话模式 ---
 // 对标 Claude Code Chat Mode：只读分析，精准解答。
 const chatModePrompt = `
 === 对话模式 ===
 ❗ 核心规则：你必须使用工具读取文件来回答问题。只输出文字而不读取文件是错误的行为。
+
+## 严格禁令 — 违反将导致任务失败
+- 绝对不要输出前言式文本（如"好的，我来审查..."、"让我分析一下..."）
+- 绝对不要列出你将采取的步骤
+- 绝对不要描述你即将做什么
+- 直接调用工具开始工作，不要有任何前置文字
+- 每次回复必须以 [TOOL: 开头或直接以 function calling 格式开始
 
 ## 工具调用方式
 如果模型支持 function calling，使用工具调用格式。
@@ -412,12 +452,8 @@ const chatModePrompt = `
 [TOOL: read_file {"path": "文件路径"}]
 [TOOL: search_files {"query": "搜索内容"}]
 
-## 工作流程
-1. 用 search_files 或 read_file 定位相关代码
-2. 基于代码给出分析
-
 ## 规则
-- 每次回复必须包含工具调用
+- 项目相关问题 → 先用工具查看代码，再回答
 - 不要凭记忆猜测，要用工具验证
 - 回答要简洁直接
 `
@@ -502,17 +538,34 @@ func (s *Service) ChatStream(req provider.ChatRequest) error {
 
 	if req.AgentID != "" {
 		ag, ok := s.agentReg.Get(req.AgentID)
+
+		// Normalize mode: default to "build" for maximum capability
+		mode := req.Mode
+		if mode != "plan" && mode != "build" && mode != "chat" {
+			mode = "build"
+		}
+		// Check if this is a simple non-technical message
+		simpleMsg := isSimpleMessage(req.Messages)
+
 		if ok && ag.SystemPrompt != "" {
 			modePrompt := ""
-			switch req.Mode {
+			switch mode {
 			case "plan":
-				modePrompt = planModePrompt
+				if simpleMsg {
+					modePrompt = planModePromptSimple
+				} else {
+					modePrompt = planModePrompt
+				}
 			case "build":
-				modePrompt = buildModePrompt
-			default:
+				if simpleMsg {
+					modePrompt = buildModePromptSimple
+				} else {
+					modePrompt = buildModePrompt
+				}
+			default: // chat
 				modePrompt = chatModePrompt
 			}
-			if req.Mode == "build" {
+			if mode == "build" && !simpleMsg {
 				modePrompt += buildToolSuppressHint(req.Messages)
 			}
 			// Build context message and merge it INTO the system prompt
@@ -527,7 +580,7 @@ func (s *Service) ChatStream(req provider.ChatRequest) error {
 		}
 		if ok && len(ag.Tools) > 0 {
 			tools := ag.Tools
-			if req.Mode == "chat" || req.Mode == "plan" {
+			if mode == "chat" || (mode == "plan" && simpleMsg) {
 				tools = []string{}
 				for _, t := range ag.Tools {
 					if tool, ok := s.toolExec.Get(t); ok && !tool.RequiresApproval() {
@@ -535,7 +588,16 @@ func (s *Service) ChatStream(req provider.ChatRequest) error {
 					}
 				}
 			}
-			if req.Mode == "build" && isSimpleMessage(req.Messages) {
+			if mode == "plan" && !simpleMsg {
+				// plan mode: read-only tools
+				tools = []string{}
+				for _, t := range ag.Tools {
+					if tool, ok := s.toolExec.Get(t); ok && !tool.RequiresApproval() {
+						tools = append(tools, t)
+					}
+				}
+			}
+			if mode == "build" && simpleMsg {
 				tools = []string{}
 			}
 			if len(tools) > 0 {
@@ -845,7 +907,14 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 	var prevMsgCount int
 	var nudgeCount int
 	s.progress = newAgentProgress()
-	maxLoops := calcMaxAgentLoops(req.Mode, req.Model)
+
+	// Normalize mode: default to "build"
+	mode := req.Mode
+	if mode != "plan" && mode != "build" && mode != "chat" {
+		mode = "build"
+	}
+
+	maxLoops := calcMaxAgentLoops(mode, req.Model)
 	warningAt := maxLoops - 3
 	if warningAt < 1 {
 		warningAt = 1
@@ -931,11 +1000,14 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 		var streamUsage *provider.TokenUsage
 
 		// Streaming-level repetition detection thresholds
-		const maxTextWithoutTools = 1500    // Max chars of text before forcing tool call
+		const maxTextWithoutTools = 4000    // Max chars of text before forcing tool call (was 1500)
 		const repetitionCheckInterval = 200 // Check for repetition every N chars
 		const repetitionThreshold = 3       // Trigger after 3 repetitions
 
-		// Check if user message is non-technical (greeting, thanks) — skip repetition detection
+		// In chat/plan mode or when tools are suppressed, text-only responses are fine
+		chatMode := mode == "chat" || mode == "plan" || (mode == "build" && isSimpleMessage(req.Messages))
+
+		// Check if user message is non-technical (greeting, thanks, general questions) — skip repetition detection
 		isNonTechMsg := false
 		{
 			lastUMsg := ""
@@ -945,7 +1017,9 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 					break
 				}
 			}
-			nonTechKws := []string{"你好", "hello", "hi ", "嗨", "hey", "谢谢", "thanks", "再见", "bye"}
+			nonTechKws := []string{"你好", "hello", "hi ", "嗨", "hey", "谢谢", "thanks", "再见", "bye",
+				"怎么样", "如何", "有没有", "能不能", "可以吗", "帮我看看", "你看看",
+				"介绍一下", "说说", "聊聊", "怎么样", "what do you think", "any issues"}
 			for _, kw := range nonTechKws {
 				if strings.Contains(lastUMsg, kw) {
 					isNonTechMsg = true
@@ -962,7 +1036,8 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 
 				// Streaming-level interrupt: detect planning loops and repetition
 				// Skip for non-technical messages (greetings don't need tool calls)
-				if !toolCallsSeen && !streamInterrupted && !isNonTechMsg {
+				// Skip for chat mode (text-only responses are acceptable)
+				if !toolCallsSeen && !streamInterrupted && !isNonTechMsg && !chatMode {
 					// Check 1: Text length threshold - model is outputting too much without tools
 					if len(assistantContent) > maxTextWithoutTools {
 						streamInterrupted = true
@@ -1201,6 +1276,46 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 				}
 
 				// If no tool calls were made, check if AI declared task done or nudge it
+				// For plan/chat mode, text-only responses are acceptable — don't force tool calls.
+				// Only force tool calls in build mode where actual code changes are expected.
+				modeForNudge := req.Mode
+				if modeForNudge != "plan" && modeForNudge != "build" && modeForNudge != "chat" {
+					modeForNudge = "build"
+				}
+				if modeForNudge == "plan" || modeForNudge == "chat" {
+					// Plan/chat mode: text-only responses are acceptable.
+					// Many models don't support function calling — accept their text analysis.
+					lowerContent := strings.ToLower(assistantContent)
+					planDone := strings.Contains(lowerContent, "规划完成") ||
+						strings.Contains(lowerContent, "分析完成") ||
+						strings.Contains(lowerContent, "分析结果")
+					if planDone || nudgeCount >= 1 {
+						// AI produced analysis or we've nudged once — accept and show to user.
+						// The AI's text was already streamed to frontend during output.
+						s.emitFn("ai:stream:data", "\n\n---\n💡 *分析模式完成。如需根据分析结果修改代码，请发送具体指令或切换到构建模式。*")
+						donePayload := map[string]interface{}{}
+						if streamUsage != nil {
+							donePayload["usage"] = streamUsage
+						}
+						s.emitFn("ai:stream:done", donePayload)
+						setDone()
+						return
+					}
+					// First round without tools: give one gentle nudge asking for deeper analysis
+					s.progress.recordEmptyRound()
+					nudgeCount++
+					currentReq.Messages = append(currentReq.Messages, provider.Message{
+						Role:    "assistant",
+						Content: assistantContent,
+					})
+					currentReq.Messages = append(currentReq.Messages, provider.Message{
+						Role:    "user",
+						Content: "请深入分析项目，给出具体的发现和建议。\n\n你可以使用工具：\n[TOOL: read_file {\"path\": \"文件路径\"}] — 读取文件\n[TOOL: search_files {\"query\": \"搜索内容\"}] — 搜索代码\n[TOOL: glob_files {\"pattern\": \"**/*.go\"}] — 查找文件\n[TOOL: list_directory {\"path\": \"目录\"}] — 列出目录\n\n示例：[TOOL: read_file {\"path\": \"main.go\"}]",
+					})
+					continue
+				}
+
+				// Build mode: tool calls are required
 				if !toolCallsSeen && assistantContent != "" {
 					s.progress.recordEmptyRound()
 
@@ -1451,7 +1566,7 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 		}
 
 		// Auto-verify after file modifications in build mode
-		if len(modifiedFiles) > 0 && s.verifyFn != nil && req.Mode == "build" {
+		if len(modifiedFiles) > 0 && s.verifyFn != nil && mode == "build" {
 			verifyCtx, verifyCancel := context.WithTimeout(ctx, 60*time.Second)
 			verifySummary := s.verifyFn(verifyCtx, modifiedFiles)
 			verifyCancel()
