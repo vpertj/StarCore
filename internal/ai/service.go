@@ -931,9 +931,28 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 		var streamUsage *provider.TokenUsage
 
 		// Streaming-level repetition detection thresholds
-		const maxTextWithoutTools = 1500    // Max chars of text before forcing tool call (lowered from 3000)
-		const repetitionCheckInterval = 200 // Check for repetition every N chars (lowered from 500)
-		const repetitionThreshold = 2       // Trigger after 2 repetitions (lowered from 3)
+		const maxTextWithoutTools = 1500    // Max chars of text before forcing tool call
+		const repetitionCheckInterval = 200 // Check for repetition every N chars
+		const repetitionThreshold = 3       // Trigger after 3 repetitions
+
+		// Check if user message is non-technical (greeting, thanks) — skip repetition detection
+		isNonTechMsg := false
+		{
+			lastUMsg := ""
+			for i := len(currentReq.Messages) - 1; i >= 0; i-- {
+				if currentReq.Messages[i].Role == "user" {
+					lastUMsg = strings.ToLower(currentReq.Messages[i].Content)
+					break
+				}
+			}
+			nonTechKws := []string{"你好", "hello", "hi ", "嗨", "hey", "谢谢", "thanks", "再见", "bye"}
+			for _, kw := range nonTechKws {
+				if strings.Contains(lastUMsg, kw) {
+					isNonTechMsg = true
+					break
+				}
+			}
+		}
 
 		for event := range eventCh {
 			streamReceivedAny = true
@@ -942,7 +961,8 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 				assistantContent += event.Content
 
 				// Streaming-level interrupt: detect planning loops and repetition
-				if !toolCallsSeen && !streamInterrupted {
+				// Skip for non-technical messages (greetings don't need tool calls)
+				if !toolCallsSeen && !streamInterrupted && !isNonTechMsg {
 					// Check 1: Text length threshold - model is outputting too much without tools
 					if len(assistantContent) > maxTextWithoutTools {
 						streamInterrupted = true
@@ -1149,7 +1169,7 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 				}
 			}
 
-			if req.Mode == "build" || req.Mode == "plan" {
+			if req.Mode == "build" || req.Mode == "plan" || req.Mode == "chat" {
 				// Check if this is a non-technical exchange (greeting, simple question)
 				// that doesn't require tool calls — exit immediately
 				isNonTechnical := false
