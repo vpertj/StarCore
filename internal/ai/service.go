@@ -113,6 +113,7 @@ type Service struct {
 	progress *AgentProgress
 
 	intentClassifier *agent.IntentClassifier
+	toolRouter       *agent.ToolRouter
 }
 
 // AgentProgress tracks progress within a single agent loop session.
@@ -164,6 +165,7 @@ func NewService(
 		fileHistory:      agentTools.NewFileHistory(),
 		progress:         newAgentProgress(),
 		intentClassifier: agent.NewIntentClassifier(),
+		toolRouter:       agent.NewToolRouter(),
 	}
 }
 
@@ -474,6 +476,16 @@ func (s *Service) ChatStream(req provider.ChatRequest) error {
 
 	if intent != nil {
 		s.loopState.SetDetectedIntent(intent)
+	}
+
+	if req.AgentID == "" && intent != nil && intent.Confidence >= agent.HighConfidence {
+		if suggestedAgent := s.agentReg.FindByIntent(intent.Intent); suggestedAgent != "" {
+			req.AgentID = suggestedAgent
+			s.emitFn("ai:agent:suggested", map[string]any{
+				"agentID": suggestedAgent,
+				"intent":  string(intent.Intent),
+			})
+		}
 	}
 
 	if req.AgentID != "" {
@@ -1138,6 +1150,12 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 						}
 						nudgeContent += toolHint
 
+						if intent := s.loopState.GetDetectedIntent(); intent != nil {
+							if suggestion := s.toolRouter.SuggestTools(s.loopState.GetOriginalGoal()); suggestion != nil {
+								nudgeContent += fmt.Sprintf("\n建议使用的工具: %s\n%s", suggestion.PrimaryTool, suggestion.Hint)
+							}
+						}
+
 						currentReq.Messages = append(currentReq.Messages, provider.Message{
 							Role:    "assistant",
 							Content: assistantContent,
@@ -1248,9 +1266,12 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 					tr := <-ch
 					if tr.err != nil {
 						toolFailures++
-						errData := map[string]string{"callId": tr.call.ID, "name": tr.call.Name, "error": tr.err.Error()}
+						classified := agent.ClassifyToolError(tr.call.Name, tr.err)
+						s.loopState.RecordToolFailure(tr.call.Name)
+						errData := map[string]string{"callId": tr.call.ID, "name": tr.call.Name, "error": tr.err.Error(), "category": classified.Category}
 						s.emitFn("ai:stream:tool_result", errData)
-						currentReq.Messages = append(currentReq.Messages, provider.Message{Role: "tool", Content: fmt.Sprintf("Error: %s", tr.err.Error()), ToolCallID: tr.call.ID, Name: tr.call.Name})
+						errorMsg := agent.FormatClassifiedError(classified)
+						currentReq.Messages = append(currentReq.Messages, provider.Message{Role: "tool", Content: errorMsg, ToolCallID: tr.call.ID, Name: tr.call.Name})
 					} else {
 						if tr.result.FileMeta != nil {
 							resultMap := map[string]any{
@@ -1274,6 +1295,7 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 							filePath = tr.result.FileMeta.FilePath
 						}
 						s.progress.recordToolCall(tr.call.Name, true, filePath)
+						s.loopState.ResetToolFailure(tr.call.Name)
 					}
 				}
 
@@ -1282,6 +1304,16 @@ func (s *Service) runAgentLoop(req provider.ChatRequest, ctx context.Context) {
 					s.cb.RecordFailure()
 				} else if len(calls) > 0 {
 					s.cb.RecordSuccess()
+				}
+
+				for _, call := range calls {
+					if failures := s.loopState.GetConsecutiveFailures(call.Name); failures >= 3 {
+						currentReq.Messages = append(currentReq.Messages, provider.Message{
+							Role:    "system",
+							Content: fmt.Sprintf("工具 %s 已连续失败 %d 次。请换一种方法完成任务，或向用户说明困难。", call.Name, failures),
+						})
+						break
+					}
 				}
 			}
 		}
