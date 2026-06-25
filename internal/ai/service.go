@@ -515,7 +515,14 @@ func (s *Service) ChatStream(req provider.ChatRequest) error {
 			if req.Mode == "build" {
 				modePrompt += buildToolSuppressHint(req.Messages)
 			}
-			systemMsg := provider.Message{Role: "system", Content: ag.SystemPrompt + getLanguageHint(req.Model) + modePrompt}
+			// Build context message and merge it INTO the system prompt
+			// This ensures tool instructions come FIRST, context comes SECOND
+			contextMsg := s.buildContext(req)
+			systemContent := ag.SystemPrompt + getLanguageHint(req.Model) + modePrompt
+			if contextMsg != "" {
+				systemContent += "\n\n" + contextMsg
+			}
+			systemMsg := provider.Message{Role: "system", Content: systemContent}
 			req.Messages = append([]provider.Message{systemMsg}, req.Messages...)
 		}
 		if ok && len(ag.Tools) > 0 {
@@ -533,11 +540,15 @@ func (s *Service) ChatStream(req provider.ChatRequest) error {
 			}
 			if len(tools) > 0 {
 				req.Tools = s.buildToolDefinitions(tools)
-				// Also inject tool instructions into the prompt for models that
-				// don't support function calling format
+				// Inject tool instructions into the system prompt (not as separate message)
 				toolHint := buildToolUsageHint(req.Tools, "")
 				if toolHint != "" {
-					req.Messages = append([]provider.Message{{Role: "system", Content: toolHint}}, req.Messages...)
+					// Prepend tool hint to the first system message
+					if len(req.Messages) > 0 && req.Messages[0].Role == "system" {
+						req.Messages[0].Content = toolHint + "\n" + req.Messages[0].Content
+					} else {
+						req.Messages = append([]provider.Message{{Role: "system", Content: toolHint}}, req.Messages...)
+					}
 				}
 			} else {
 				req.Tools = nil
@@ -546,11 +557,12 @@ func (s *Service) ChatStream(req provider.ChatRequest) error {
 				s.toolExec.SetAutoApprove(t, true)
 			}
 		}
-	}
-
-	contextMsg := s.buildContext(req)
-	if contextMsg != "" {
-		req.Messages = append([]provider.Message{{Role: "system", Content: contextMsg}}, req.Messages...)
+	} else {
+		// No agent selected — still build context and merge into a system message
+		contextMsg := s.buildContext(req)
+		if contextMsg != "" {
+			req.Messages = append([]provider.Message{{Role: "system", Content: contextMsg}}, req.Messages...)
+		}
 	}
 
 	for i := len(req.Messages) - 1; i >= 0; i-- {

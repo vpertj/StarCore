@@ -20,7 +20,7 @@ func AllAgents() []agent.AgentDef {
 			DefaultModel: "",
 			Tools:        []string{"read_file", "write_file", "edit_file", "create_directory", "delete_file", "move_file", "search_files", "list_directory", "glob_files", "execute_command", "http_request", "web_fetch", "get_git_diff", "git_commit", "git_pull", "git_push", "todo_write", "ask_user", "skill", "sub_agent"},
 			Skills:       []string{"generate-test", "code-review", "explain-code", "fix-bug"},
-			Capabilities: []agent.IntentType{agent.IntentCodeEdit, agent.IntentDebug, agent.IntentSearch, agent.IntentChat, agent.IntentCodeExplain},
+			Capabilities: []agent.IntentType{agent.IntentCodeEdit, agent.IntentDebug, agent.IntentSearch, agent.IntentChat, agent.IntentCodeExplain, agent.IntentReview},
 			Priority:     0,
 		},
 		{
@@ -80,7 +80,7 @@ func AllAgents() []agent.AgentDef {
 			DefaultModel: "",
 			Tools:        []string{"read_file", "write_file", "edit_file", "create_directory", "delete_file", "move_file", "search_files", "glob_files", "execute_command", "http_request", "web_fetch", "get_git_diff", "git_commit", "git_pull", "git_push", "todo_write", "ask_user", "skill", "sub_agent"},
 			Skills:       []string{"code-review", "sql-optimize"},
-			Capabilities: []agent.IntentType{agent.IntentRefactor, agent.IntentDebug},
+			Capabilities: []agent.IntentType{agent.IntentRefactor},
 			Priority:     15,
 		},
 		{
@@ -100,7 +100,7 @@ func AllAgents() []agent.AgentDef {
 			DefaultModel: "",
 			Tools:        []string{"read_file", "search_files", "glob_files", "todo_write", "ask_user", "skill", "sub_agent"},
 			Skills:       []string{"code-review"},
-			Capabilities: []agent.IntentType{agent.IntentCodeExplain, agent.IntentSearch},
+			Capabilities: []agent.IntentType{agent.IntentCodeExplain, agent.IntentSearch, agent.IntentReview},
 			Priority:     10,
 		},
 		{

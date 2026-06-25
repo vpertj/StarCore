@@ -17,6 +17,7 @@ const (
 	IntentPlan        IntentType = "plan"
 	IntentTest        IntentType = "test"
 	IntentDoc         IntentType = "doc"
+	IntentReview      IntentType = "review"
 )
 
 const (
@@ -61,8 +62,10 @@ func buildDefaultRules() []intentRule {
 		{
 			intent: IntentDebug,
 			keywords: []string{
-				"修复", "报错", "错误", "异常", "bug", "问题", "不工作", "失败", "崩溃",
-				"fix", "error", "bug", "crash", "broken", "not working", "fail", "issue",
+				"修复", "报错", "错误", "异常", "bug", "不工作", "失败", "崩溃",
+				"fix", "error", "bug", "crash", "broken", "not working", "fail",
+				// Note: "问题" is too generic — it matches "有什么问题" (review), not just debug
+				// Only match "问题" when combined with debug context
 			},
 			weight: 1.2,
 		},
@@ -117,6 +120,14 @@ func buildDefaultRules() []intentRule {
 				"文档", "注释", "document", "comment", "documentation",
 			},
 			weight: 0.8,
+		},
+		{
+			intent: IntentReview,
+			keywords: []string{
+				"看看", "检查", "审查", "review", "有什么问题", "找问题",
+				"有什么bug", "有没有问题", "帮我看看", "帮我看",
+			},
+			weight: 1.1,
 		},
 		{
 			intent: IntentChat,
