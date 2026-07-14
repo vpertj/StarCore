@@ -1,0 +1,64 @@
+name: Build and Release Windows
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.0'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install Frontend Dependencies
+        run: |
+          Remove-Item -Path node_modules -Force -Recurse -ErrorAction SilentlyContinue
+          npm cache clean --force
+          npm install --force
+        working-directory: ./frontend
+
+      - name: Build Frontend
+        run: npm run build
+        working-directory: ./frontend
+
+      - name: Build Windows Binary
+        run: wails build -platform windows/amd64
+
+      - name: Package Release
+        run: |
+          $version = "${{ github.ref_name }}"
+          $exePath = "build\bin\StarCore.exe"
+          $zipName = "StarCore-windows-amd64-$version.zip"
+          Compress-Archive -Path $exePath -DestinationPath $zipName
+          Write-Output "Created: $zipName"
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: StarCore-windows-amd64-*.zip
+          generate_release_notes: true
+          tag_name: ${{ github.ref_name }}
+          name: "StarCore ${{ github.ref_name }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

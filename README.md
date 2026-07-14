@@ -1,6 +1,6 @@
 # StarCore IDE
 
-**AI-Native Desktop IDE** — Built with Go + Svelte 5, powered by a multi-agent architecture with 21 tools, 10 agent roles, and autonomous task execution.
+**AI 驱动的下一代桌面 IDE** — 对标 Cursor / Claude Code，用 Go + Svelte 5 构建。
 
 [![Build](https://github.com/vpertj/StarCore/actions/workflows/ci.yml/badge.svg)](https://github.com/vpertj/StarCore/actions)
 [![Release](https://github.com/vpertj/StarCore/actions/workflows/release.yml/badge.svg)](https://github.com/vpertj/StarCore/actions)
@@ -8,54 +8,54 @@
 
 ---
 
-## Table of Contents
+## 目录
 
-- [Highlights](#highlights)
-- [Architecture](#architecture)
-- [Agent Orchestration](#agent-orchestration)
-- [Tech Stack](#tech-stack)
-- [Quick Start](#quick-start)
-- [Configuration](#configuration)
-- [Skills System](#skills-system)
-- [Project Structure](#project-structure)
+- [核心特性](#核心特性)
+- [系统架构](#系统架构)
+- [Agent 编排引擎](#agent-编排引擎)
+- [技术栈](#技术栈)
+- [快速开始](#快速开始)
+- [AI 提供商配置](#ai-提供商配置)
+- [技能系统](#技能系统)
+- [项目结构](#项目结构)
 - [License](#license)
 
 ---
 
-## Highlights
+## 核心特性
 
-- **Multi-Agent System** — 10 specialized agent roles (Universal, Frontend/Backend Architect, DevOps, QA, PM...) with capability-based routing
-- **21 Built-in Tools** — File CRUD, command execution, code search, Git operations, HTTP requests, LSP diagnostics, sub-agents, and more
-- **Autonomous Task Execution** — Agent loop with up to 80 iterations, automatic tool calling, error recovery, and anti-drift mechanisms
-- **Context-Aware** — Project structure analysis, dependency graph, RAG semantic search, knowledge base, and smart context compression
-- **Multi-Model** — OpenAI, Anthropic, DeepSeek, Ollama (local) with automatic failover and cost tracking
-- **Skills System** — 24+ built-in skills for code review, testing, security audit, SQL optimization, API design...
-- **Full IDE** — CodeMirror 6 editor, Xterm.js terminal, Git panel, file explorer, LSP support
-- **Cross-Platform** — Windows, macOS, Linux
+- **多 Agent 系统** — 10 种专业角色（通用助手、前后端架构师、DevOps、QA、PM...），基于能力自动路由
+- **21 个内置工具** — 文件 CRUD、命令执行、代码搜索、Git、HTTP、LSP、子代理等
+- **自主任务执行** — Agent 循环最多 80 轮，自动调用工具、错误恢复、防偏离
+- **上下文感知** — 项目结构分析、依赖图、RAG 语义搜索、知识库、智能压缩
+- **多模型支持** — OpenAI / Anthropic / DeepSeek / Ollama（本地），自动故障转移
+- **技能系统** — 24+ 内置技能，涵盖代码审查、测试、安全审计、SQL 优化、API 设计
+- **完整 IDE** — CodeMirror 6 编辑器、Xterm.js 终端、Git 面板、文件浏览器、LSP 支持
+- **跨平台** — Windows、macOS、Linux
 
 ---
 
-## Architecture
+## 系统架构
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Frontend (Svelte 5)                       │
+│                     前端 (Svelte 5)                              │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────────┐  │
-│  │ AIPanel  │  │ CodeEdit │  │ Terminal │  │ Git/File Panel │  │
+│  │  AI 面板  │  │ 代码编辑器│  │   终端   │  │ Git/文件面板   │  │
 │  └────┬─────┘  └──────────┘  └──────────┘  └────────────────┘  │
-│       │ Wails Event System                                       │
+│       │ Wails 事件系统                                            │
 ├───────┼─────────────────────────────────────────────────────────┤
-│       │                 Backend (Go 1.23)                        │
+│       │                 后端 (Go 1.23)                           │
 │  ┌────┴─────────────────────────────────────────────────────┐   │
-│  │                    AI Service Layer                        │   │
+│  │                    AI 服务层                               │   │
 │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │   │
-│  │  │  Agent   │  │ Context  │  │ Provider │  │  Memory  │  │   │
-│  │  │  Loop    │  │ Builder  │  │ Manager  │  │  Store   │  │   │
+│  │  │  Agent   │  │ 上下文   │  │ Provider │  │  记忆    │  │   │
+│  │  │  循环    │  │ 构建器   │  │ 管理器   │  │  存储    │  │   │
 │  │  └────┬─────┘  └──────────┘  └──────────┘  └──────────┘  │   │
 │  │       │                                                     │   │
 │  │  ┌────┴─────────────────────────────────────────────────┐  │   │
-│  │  │              Tool Execution Layer                     │  │   │
-│  │  │  21 Tools │ Sub-Agents │ Skills │ LSP │ MCP         │  │   │
+│  │  │              工具执行层                               │  │   │
+│  │  │ 21 工具 │ 子代理 │ 技能 │ LSP │ MCP                 │  │   │
 │  │  └─────────────────────────────────────────────────────┘  │   │
 │  └───────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
@@ -63,282 +63,279 @@
 
 ---
 
-## Agent Orchestration
+## Agent 编排引擎
 
-### Agent Loop (Core Engine)
+### Agent 循环（核心引擎）
 
-The agent loop is the heart of StarCore's autonomous coding capability. It manages the entire lifecycle of an AI task:
+Agent 循环是 StarCore 自主编程能力的核心，管理整个 AI 任务生命周期：
 
 ```
-User Request
+用户请求
     │
     ▼
 ┌─────────────────┐
-│ Intent Classifier│ ──→ Determines task type (code_edit, debug, refactor, review...)
+│ 意图分类器       │ ──→ 判断任务类型（编码、调试、重构、审查...）
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│  Agent Router   │ ──→ Selects optimal agent based on intent + capabilities
+│  Agent 路由器    │ ──→ 根据意图 + 能力选择最优 Agent
 └────────┬────────┘
          │
          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    Agent Loop (max 80 iterations)            │
+│                 Agent 循环（最多 80 轮）                      │
 │                                                              │
-│  ┌─── For each iteration ─────────────────────────────────┐ │
-│  │                                                         │ │
-│  │  1. Build Context (stable prefix + dynamic suffix)      │ │
-│  │     ├─ Git status + Code structure analysis             │ │
-│  │     ├─ Project rules (.starcorerules)                   │ │
-│  │     ├─ Knowledge base + RAG results                     │ │
-│  │     ├─ Active file + Selected code                      │ │
-│  │     └─ Conversation history (compressed if needed)      │ │
-│  │                                                         │ │
-│  │  2. Inject Loop State                                   │ │
-│  │     ├─ Todo list + Progress percentage                  │ │
-│  │     ├─ Files touched this session                       │ │
-│  │     ├─ Key decisions (max 5, FIFO)                      │ │
-│  │     └─ Anti-drift: re-inject original goal every 10 rnd │ │
-│  │                                                         │ │
-│  │  3. Call LLM (with retry + circuit breaker)             │ │
-│  │     ├─ Streaming response                               │ │
-│  │     ├─ Repetition detection (interrupt if looping)      │ │
-│  │     └─ Tool call parsing (function calling + text)      │ │
-│  │                                                         │ │
-│  │  4. Execute Tools (parallel goroutines)                 │ │
-│  │     ├─ Timeout: 60s (6min for approval-required)        │ │
-│  │     ├─ Result truncation (dynamic budget, max 12K)      │ │
-│  │     ├─ Auto-verify (build mode: go test, npm build...)  │ │
-│  │     └─ Syntax check (go fmt, py_compile, tsc)           │ │
-│  │                                                         │ │
-│  │  5. Safety Checks                                       │ │
-│  │     ├─ Exact repeat detection (same tool calls)         │ │
-│  │     ├─ Semantic repeat detection (80% similarity)       │ │
-│  │     ├─ Stagnation detection (5 rounds no progress)      │ │
-│  │     ├─ File modification rate limit (10 per file)       │ │
-│  │     └─ Loop limit warning (3 rounds before max)         │ │
-│  │                                                         │ │
-│  │  6. Nudge (if no tools called)                          │ │
-│  │     ├─ Dynamic nudge count (2-10 based on complexity)   │ │
-│  │     ├─ Include original goal + files modified            │ │
-│  │     ├─ Tool routing suggestion                          │ │
-│  │     └─ After 2 nudges: suggest model switch             │ │
-│  │                                                         │ │
-│  └─── Next iteration ─────────────────────────────────────┘ │
+│  ┌─── 每轮迭代 ──────────────────────────────────────────┐  │
+│  │                                                        │  │
+│  │  1. 构建上下文（稳定前缀 + 动态后缀）                   │  │
+│  │     ├─ Git 状态 + 代码结构分析                          │  │
+│  │     ├─ 项目规则（.starcorerules）                       │  │
+│  │     ├─ 知识库 + RAG 结果                                │  │
+│  │     ├─ 活动文件 + 选中代码                              │  │
+│  │     └─ 对话历史（压缩处理）                             │  │
+│  │                                                        │  │
+│  │  2. 注入循环状态                                        │  │
+│  │     ├─ Todo 列表 + 进度百分比                           │  │
+│  │     ├─ 已修改文件                                       │  │
+│  │     ├─ 关键决策（最多 5 条，FIFO）                      │  │
+│  │     └─ 防偏离：每 10 轮重新注入原始目标                 │  │
+│  │                                                        │  │
+│  │  3. 调用 LLM（重试 + 熔断器）                           │  │
+│  │     ├─ 流式响应                                         │  │
+│  │     ├─ 重复检测（循环时中断）                           │  │
+│  │     └─ 工具调用解析（function calling + 文本）          │  │
+│  │                                                        │  │
+│  │  4. 并行执行工具                                        │  │
+│  │     ├─ 超时：60 秒（需审批的 6 分钟）                   │  │
+│  │     ├─ 结果截断（动态预算，最大 12K 字符）              │  │
+│  │     ├─ 自动验证（build 模式：go test、npm build）       │  │
+│  │     └─ 语法检查（go fmt、py_compile、tsc）              │  │
+│  │                                                        │  │
+│  │  5. 安全检查                                            │  │
+│  │     ├─ 精确重复检测（相同工具调用）                     │  │
+│  │     ├─ 语义重复检测（80% 相似度）                       │  │
+│  │     ├─ 停滞检测（5 轮无进展）                           │  │
+│  │     ├─ 文件修改频率限制（每文件最多 10 次）             │  │
+│  │     └─ 循环限制警告（距离上限 3 轮时提醒）             │  │
+│  │                                                        │  │
+│  │  6. Nudge 机制（未调用工具时）                          │  │
+│  │     ├─ 动态 nudge 次数（2-10 次，根据复杂度）           │  │
+│  │     ├─ 包含原始目标 + 已修改文件                        │  │
+│  │     ├─ 工具路由建议                                     │  │
+│  │     └─ 2 次 nudge 后建议切换模型                        │  │
+│  │                                                        │  │
+│  └─── 下一轮 ────────────────────────────────────────────┘  │
 │                                                              │
-│  Auto-continue: +20 rounds (max 3 times) when limit reached  │
+│  自动续期：达到上限后 +20 轮（最多 3 次）                     │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-### Agent Roles (10 Specialized Agents)
+### 10 种专业 Agent
 
-| Agent | Icon | Capabilities | Best For |
-|-------|------|-------------|----------|
-| Universal Assistant | ⚡ | All tools, all intents | General coding tasks |
-| Frontend Architect | 🌐 | read/write/edit, search | React/Vue/Svelte/Angular |
-| Backend Architect | ⚙️ | read/write/edit, search, execute | Go/Node/Python/Java |
-| UI Designer | 🎨 | read/write/edit | Design systems, CSS, layouts |
-| DevOps Engineer | 🚀 | read/write/edit, execute | Docker, K8s, CI/CD, deploy |
-| Performance Expert | 📊 | read/write/edit, search, execute | Optimization, profiling |
-| API Test Engineer | 🧪 | read/write/edit, execute | Testing, mocking, coverage |
-| Compliance Checker | 🛡️ | read, search | Security audit, code review |
-| Product Manager | 📋 | read/write/edit | Requirements, PRD, planning |
-| AI Integration Engineer | 🤖 | read/write/edit | LLM integration, RAG, agents |
+| Agent | 图标 | 能力 | 适用场景 |
+|-------|------|------|---------|
+| 通用助手 | ⚡ | 所有工具 | 通用编程任务 |
+| 前端架构师 | 🌐 | 读/写/编辑、搜索 | React/Vue/Svelte/Angular |
+| 后端架构师 | ⚙️ | 读/写/编辑、搜索、执行 | Go/Node/Python/Java |
+| UI 设计师 | 🎨 | 读/写/编辑 | 设计系统、CSS、布局 |
+| DevOps 工程师 | 🚀 | 读/写/编辑、执行 | Docker、K8s、CI/CD |
+| 性能优化师 | 📊 | 读/写/编辑、搜索、执行 | 性能优化、分析 |
+| API 测试工程师 | 🧪 | 读/写/编辑、执行 | 测试、Mock、覆盖率 |
+| 合规审查员 | 🛡️ | 读、搜索 | 安全审计、代码审查 |
+| 产品经理 | 📋 | 读/写/编辑 | 需求分析、PRD |
+| AI 集成工程师 | 🤖 | 读/写/编辑 | LLM 集成、RAG、Agent |
 
-### Tool System (21 Built-in Tools)
+### 21 个内置工具
 
 ```
-File Operations          Execution & Search        Git & Network
-─────────────           ──────────────           ─────────────
-read_file               execute_command          get_git_diff
-write_file              search_files             git_commit
-edit_file               glob_files               git_pull
-multi_edit              list_directory           git_push
-create_directory        get_diagnostics
-delete_file             web_fetch
-move_file               http_request
+文件操作              执行与搜索            Git 与网络
+──────────────       ────────────         ──────────────
+read_file            execute_command      get_git_diff
+write_file           search_files         git_commit
+edit_file            glob_files           git_pull
+multi_edit           list_directory       git_push
+create_directory     get_diagnostics
+delete_file          web_fetch
+move_file            http_request
 
-Workflow & Meta
+工作流与元操作
 ──────────────
-todo_write              skill (execute skills)
-ask_user                sub_agent (parallel tasks)
+todo_write           skill（执行技能）
+ask_user             sub_agent（并行子任务）
 ```
 
-### Context Engineering
+### 上下文工程
 
-StarCore uses a sophisticated context management system:
+StarCore 使用精密的上下文管理系统：
 
-1. **Stable Prefix** (cacheable across requests):
-   - Git context (branch, recent commits, diff stats)
-   - Code structure analysis (functions, types, imports)
-   - Project rules (.starcorerules)
-   - Project structure tree
-   - Knowledge base entries
-   - RAG semantic search results
+1. **稳定前缀**（跨请求可缓存）：
+   - Git 上下文（分支、最近提交、diff 统计）
+   - 代码结构分析（函数、类型、导入）
+   - 项目规则（.starcorerules）
+   - 项目结构树
+   - 知识库条目
+   - RAG 语义搜索结果
 
-2. **Dynamic_suffix** (varies per request):
-   - Context files (user-selected)
-   - Active file content
-   - Selected code
+2. **动态后缀**（每次请求变化）：
+   - 上下文文件（用户选择）
+   - 活动文件内容
+   - 选中代码
 
-3. **Smart Compression**:
-   - Token estimation (provider-specific CJK/ASCII ratios)
-   - AI-powered summarization when context exceeds 80% of window
-   - Message pruning (keep system prefix + suffix + recent 60 messages)
-   - Summary persistence to SQLite
+3. **智能压缩**：
+   - Token 估算（Provider 感知的 CJK/ASCII 比率）
+   - 超出 80% 窗口时 AI 摘要
+   - 消息裁剪（保留系统前缀 + 后缀 + 最近 60 条）
+   - 摘要持久化到 SQLite
 
-4. **Deduplication**:
-   - Path normalization + content hash
-   - Containment detection (remove files fully contained in others)
+4. **智能去重**：
+   - 路径标准化 + 内容指纹（FNV-1a）
+   - 包含检测（移除被子文件包含的冗余文件）
 
-### Safety Mechanisms
+### 安全机制
 
-| Mechanism | Description |
-|-----------|-------------|
-| **Circuit Breaker** | Opens after 10 consecutive failures, auto-recovers after 60s |
-| **Repetition Detection** | 4-layer: exact line, sentence, prefix (5 chars), 8-gram sliding window |
-| **Stagnation Detection** | Alerts after 5 rounds without progress |
-| **Anti-Drift** | Re-injects original goal every 10 rounds |
-| **File Rate Limit** | Warns at 5 modifications, blocks at 10 per file |
-| **Tool Error Classification** | 5 categories: retryable, needs LLM, fatal, permission, syntax |
-| **Consecutive Failure Tracking** | Per-tool failure counting with strategy change prompt |
-| **Sandbox** | Path traversal detection, command validation, SSRF protection |
-
----
-
-## Tech Stack
-
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| **Backend** | Go 1.23 + Wails v2 v2.12.0 | Desktop app framework |
-| **Frontend** | Svelte 5 (runes) + Tailwind CSS v4 | UI framework |
-| **Editor** | CodeMirror 6 | Code editing with syntax highlighting |
-| **Terminal** | Xterm.js | Integrated terminal |
-| **AI** | OpenAI / Anthropic / DeepSeek / Ollama | LLM providers |
-| **Database** | SQLite (mattn/go-sqlite3) | Conversations, knowledge, tokens |
-| **LSP** | gopls / typescript-language-server / pyright | Code intelligence |
-| **Build** | esbuild (via Vite) + Wails | Bundling and native compilation |
+| 机制 | 说明 |
+|------|------|
+| **熔断器** | 连续 10 次失败断开，60 秒后自动恢复 |
+| **重复检测** | 4 层：精确行、句子、前缀（5 字符）、8 字符滑窗 |
+| **停滞检测** | 5 轮无进展触发警告 |
+| **防偏离** | 每 10 轮重新注入原始目标 |
+| **文件频率限制** | 单文件修改 5 次提醒，10 次阻止 |
+| **工具错误分类** | 5 类：可重试、需 LLM、致命、权限、语法 |
+| **沙箱** | 路径遍历检测、命令验证、SSRF 防护 |
 
 ---
 
-## Quick Start
+## 技术栈
 
-### Prerequisites
+| 层 | 技术 | 用途 |
+|---|------|------|
+| **后端** | Go 1.23 + Wails v2 v2.12.0 | 桌面应用框架 |
+| **前端** | Svelte 5 (runes) + Tailwind CSS v4 | UI 框架 |
+| **编辑器** | CodeMirror 6 | 代码编辑与语法高亮 |
+| **终端** | Xterm.js | 集成终端 |
+| **AI** | OpenAI / Anthropic / DeepSeek / Ollama | LLM 提供商 |
+| **数据库** | SQLite (mattn/go-sqlite3) | 对话、记忆、Token 记录 |
+| **LSP** | gopls / typescript-language-server / pyright | 代码智能 |
+| **构建** | esbuild (via Vite) + Wails | 打包与原生编译 |
+
+---
+
+## 快速开始
+
+### 前提条件
 - Go 1.23+
 - Node.js 18+
-- Wails CLI: `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
+- Wails CLI：`go install github.com/wailsapp/wails/v2/cmd/wails@latest`
 
-### Development
+### 开发模式
 ```bash
 git clone https://github.com/vpertj/StarCore.git
 cd StarCore
 wails dev
 ```
 
-### Build
+### 构建
 ```bash
 # Windows
-wails build -platform windows -arch amd64
+wails build -platform windows/amd64
 
 # macOS
-wails build -platform darwin -arch arm64
+wails build -platform darwin/arm64
 
 # Linux
-wails build -platform linux -arch amd64
+wails build -platform linux/amd64
 ```
 
-Or use Makefile:
+或使用 Makefile：
 ```bash
-make build-windows   # Build Windows exe
-make test            # Run tests
-make clean           # Clean artifacts
+make build-windows   # 构建 Windows exe
+make test            # 运行测试
+make clean           # 清理构建产物
 ```
 
 ---
 
-## Configuration
+## AI 提供商配置
 
-### AI Providers
+| 提供商 | 默认端点 | API Key |
+|--------|----------|---------|
+| OpenAI | `https://api.openai.com/v1` | [获取](https://platform.openai.com) |
+| Anthropic | `https://api.anthropic.com/v1` | [获取](https://console.anthropic.com) |
+| DeepSeek | `https://api.deepseek.com/v1` | [获取](https://platform.deepseek.com) |
+| Ollama | `http://localhost:11434` | 无需（本地运行） |
 
-| Provider | Default Endpoint | API Key |
-|----------|-----------------|---------|
-| OpenAI | `https://api.openai.com/v1` | [Get Key](https://platform.openai.com) |
-| Anthropic | `https://api.anthropic.com/v1` | [Get Key](https://console.anthropic.com) |
-| DeepSeek | `https://api.deepseek.com/v1` | [Get Key](https://platform.deepseek.com) |
-| Ollama | `http://localhost:11434` | Not needed (local) |
+**免费方案**：安装 [Ollama](https://ollama.com)，运行 `ollama pull qwen2.5-coder:7b`，在 StarCore 中添加 Ollama 提供商即可。
 
-**Free tier**: Install [Ollama](https://ollama.com), run `ollama pull qwen2.5-coder:7b`, add as provider in StarCore.
+### 项目规则
 
-### Project Rules
-
-Create `.starcorerules` in project root (also supports `.cursorrules` and `CLAUDE.md`):
+在项目根目录创建 `.starcorerules`（兼容 `.cursorrules` 和 `CLAUDE.md`）：
 
 ```markdown
-Always reply in Chinese
-Use vitest for testing
-Don't introduce new third-party dependencies
-Follow the existing code style
+始终用中文回复
+测试框架使用 vitest
+不要引入新的第三方依赖
+遵循项目现有代码风格
 ```
 
 ---
 
-## Skills System
+## 技能系统
 
-24+ built-in skills organized by category:
+24+ 内置技能，按类别组织：
 
-| Category | Skills |
-|----------|--------|
-| **Code** | Generate tests, Code review, Refactor, Debug analysis, Security check, Performance analysis, Error handling |
-| **Project** | Project init, Dependency audit, Generate README, Log analysis, Shell script |
-| **Git** | PR review, Commit message |
-| **Database** | SQL optimization, Migration scripts, Data modeling, API design |
+| 类别 | 技能 |
+|------|------|
+| **代码** | 生成测试、代码审查、重构建议、调试分析、安全检查、性能分析、错误处理 |
+| **项目** | 项目初始化、依赖审计、生成 README、日志分析、Shell 脚本 |
+| **Git** | PR 审查、提交信息规范 |
+| **数据库** | SQL 优化、迁移脚本、数据建模、API 设计 |
 
-Trigger in chat with `/skill-name` or let the agent auto-invoke.
+在对话中输入 `/技能名` 触发，或由 Agent 自动调用。
 
 ---
 
-## Project Structure
+## 项目结构
 
 ```
 StarCore/
-├── app.go                    # Wails app setup + bindings
-├── main.go                   # Entry point
+├── app.go                    # Wails 应用配置 + 前后端绑定
+├── main.go                   # 程序入口
 ├── internal/
-│   ├── agent/                # Agent system
-│   │   ├── tools/            # 21 tool implementations
-│   │   │   ├── builtins.go   # Tool registry
-│   │   │   ├── sub_agent.go  # Parallel sub-agent execution
-│   │   │   └── loop_state.go # Cross-iteration state
-│   │   ├── tool_router.go    # Intent-based tool suggestions
-│   │   └── intent.go         # 10-type intent classifier
+│   ├── agent/                # Agent 系统
+│   │   ├── tools/            # 21 个工具实现
+│   │   │   ├── builtins.go   # 工具注册表
+│   │   │   ├── sub_agent.go  # 并行子代理执行
+│   │   │   └── loop_state.go # 跨轮迭代状态
+│   │   ├── tool_router.go    # 意图驱动的工具建议
+│   │   └── intent.go         # 10 类意图分类器
 │   ├── ai/
-│   │   ├── service.go        # Agent loop + streaming (1800+ lines)
-│   │   ├── truncate.go       # Smart result truncation
-│   │   └── task_router.go    # Task complexity evaluation
+│   │   ├── service.go        # Agent 循环 + 流式处理（1800+ 行）
+│   │   ├── truncate.go       # 智能结果截断
+│   │   └── task_router.go    # 任务复杂度评估
 │   ├── context/
-│   │   ├── builder.go        # Context message construction
-│   │   ├── dedup.go          # File deduplication (3-layer)
-│   │   └── auto_suggest.go   # Auto context file recommendation
-│   ├── provider/             # LLM provider implementations
-│   ├── memory/               # SQLite persistence
-│   ├── skill/                # Skills system
-│   ├── lsp/                  # Language server protocol
-│   ├── mcp/                  # Model Context Protocol
-│   ├── terminal/             # PTY management
-│   ├── git/                  # Git operations
-│   ├── files/                # File operations + search
-│   ├── watcher/              # File system watcher
-│   └── sandbox/              # Security sandbox
+│   │   ├── builder.go        # 上下文消息构建
+│   │   ├── dedup.go          # 文件去重（3 层）
+│   │   └── auto_suggest.go   # 自动上下文推荐
+│   ├── provider/             # LLM 提供商实现
+│   ├── memory/               # SQLite 持久化
+│   ├── skill/                # 技能系统
+│   ├── lsp/                  # 语言服务器协议
+│   ├── mcp/                  # 模型上下文协议
+│   ├── terminal/             # PTY 管理
+│   ├── git/                  # Git 操作
+│   ├── files/                # 文件操作 + 搜索
+│   ├── watcher/              # 文件监听
+│   └── sandbox/              # 安全沙箱
 ├── frontend/
 │   └── src/
-│       ├── components/       # Svelte 5 components
-│       └── stores/           # State management
-├── .github/workflows/        # CI/CD (build + release)
-├── build/                    # Build resources (icons, NSIS)
-├── Makefile                  # Build automation
-├── wails.json                # Wails configuration
-└── README.md                 # This file
+│       ├── components/       # Svelte 5 组件
+│       └── stores/           # 状态管理
+├── .github/workflows/        # CI/CD（构建 + 发布）
+├── build/                    # 构建资源（图标、NSIS）
+├── Makefile                  # 构建自动化
+├── wails.json                # Wails 配置
+└── README.md                 # 本文件
 ```
 
 ---
