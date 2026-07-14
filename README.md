@@ -8,6 +8,16 @@
 
 ---
 
+## 截图
+
+![StarCore IDE 主界面](./docs/screenshots/ide-main.png)
+
+*IDE 主界面：左侧文件树 + CodeMirror 编辑器 + 底部终端 + 右侧 AI 对话面板*
+
+![AI 对话面板](./docs/screenshots/ai-chat.png)
+
+*AI 对话面板：支持多 Agent、工具链可视化、技能触发（输入 `/技能名`）*
+
 ## 目录
 
 - [核心特性](#核心特性)
