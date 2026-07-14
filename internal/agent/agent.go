@@ -7,8 +7,7 @@ type AgentDef struct {
 	Description  string       `json:"description"`
 	SystemPrompt string       `json:"systemPrompt"`
 	DefaultModel string       `json:"defaultModel"`
-	Tools        []string     `json:"tools"` // explicit tool allowlist (empty = use Roles)
-	Roles        []AgentRole  `json:"roles"` // agent roles (determines tool permissions)
+	Tools        []string     `json:"tools"`
 	Skills       []string     `json:"skills"`
 	Category     string       `json:"category"`
 	Capabilities []IntentType `json:"capabilities"`
