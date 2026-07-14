@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	"StarCore/internal/agent"
 )
 
 // TodoItem represents a single task in the AI's working memory.
@@ -15,9 +17,9 @@ type TodoItem struct {
 
 // ToolCallRecord records a tool call for repetition detection.
 type ToolCallRecord struct {
-	Name      string
-	ArgsHash  string // simplified hash of arguments
-	Round     int
+	Name     string
+	ArgsHash string // simplified hash of arguments
+	Round    int
 }
 
 // LoopState is shared mutable state between the agent loop and tools like todo_write.
@@ -31,25 +33,37 @@ type LoopState struct {
 	LastAction   string   // one-line description of last completed action
 
 	// Goal tracking for anti-drift
-	OriginalGoal   string // the user's original request
-	GoalKeywords   []string // extracted keywords from the goal
-	CurrentStep    string // what the agent is currently working on
-	ProgressPct    int    // estimated completion percentage
+	OriginalGoal string   // the user's original request
+	GoalKeywords []string // extracted keywords from the goal
+	CurrentStep  string   // what the agent is currently working on
+	ProgressPct  int      // estimated completion percentage
 
 	// Tool call history for semantic repetition detection
 	ToolHistory []ToolCallRecord
 	MaxHistory  int
 
 	// Stagnation tracking
-	StagnantRounds    int // rounds with no meaningful progress
-	ToolCallsThisRound int
+	StagnantRounds         int // rounds with no meaningful progress
+	ToolCallsThisRound     int
 	FilesModifiedThisRound int
+
+	// File modification rate limiting
+	FileModCounts map[string]int // per-file modification counts
+	MaxFileMods   int            // max modifications per file before warning (default 10)
+
+	// Per-tool consecutive failure tracking
+	ToolFailures map[string]int
+
+	DetectedIntent *agent.IntentResult
 }
 
 // NewLoopState creates a fresh loop state.
 func NewLoopState() *LoopState {
 	return &LoopState{
-		MaxHistory: 30,
+		MaxHistory:    30,
+		FileModCounts: make(map[string]int),
+		MaxFileMods:   10,
+		ToolFailures:  make(map[string]int),
 	}
 }
 
@@ -69,6 +83,9 @@ func (s *LoopState) Reset() {
 	s.StagnantRounds = 0
 	s.ToolCallsThisRound = 0
 	s.FilesModifiedThisRound = 0
+	s.FileModCounts = make(map[string]int)
+	s.ToolFailures = make(map[string]int)
+	s.DetectedIntent = nil
 }
 
 // SetOriginalGoal stores the user's original request and extracts keywords.
@@ -119,6 +136,26 @@ func (s *LoopState) AddFileTouched(path string) {
 		}
 	}
 	s.FilesTouched = append(s.FilesTouched, path)
+}
+
+// CheckFileRateLimit increments the modification count for a file and returns
+// a warning message if the file has been modified too many times in this session.
+// Returns empty string if under the limit.
+func (s *LoopState) CheckFileRateLimit(path string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.FileModCounts[path]++
+	count := s.FileModCounts[path]
+
+	if count >= s.MaxFileMods {
+		return fmt.Sprintf("⚠️ 文件 %s 已在本会话中被修改 %d 次（超过 %d 次限制）。请检查是否陷入修改循环。",
+			path, count, s.MaxFileMods)
+	}
+	if count >= s.MaxFileMods/2 {
+		return fmt.Sprintf("💡 文件 %s 已修改 %d 次，请注意避免过度修改。", path, count)
+	}
+	return ""
 }
 
 // GetFilesTouched returns a copy of the touched files list.
@@ -210,6 +247,36 @@ func (s *LoopState) GetStagnantRounds() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.StagnantRounds
+}
+
+func (s *LoopState) RecordToolFailure(toolName string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ToolFailures[toolName]++
+}
+
+func (s *LoopState) ResetToolFailure(toolName string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.ToolFailures, toolName)
+}
+
+func (s *LoopState) GetConsecutiveFailures(toolName string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ToolFailures[toolName]
+}
+
+func (s *LoopState) SetDetectedIntent(intent *agent.IntentResult) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.DetectedIntent = intent
+}
+
+func (s *LoopState) GetDetectedIntent() *agent.IntentResult {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.DetectedIntent
 }
 
 // ProjectStateSummary builds a compact context string for injection into system messages.
