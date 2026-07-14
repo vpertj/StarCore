@@ -74,7 +74,7 @@ async function openFolder() {
                   {#if isActive}<span class="mr-1">●</span>{/if}
                   {proj.split(/[\\/]/).pop() || proj}
                 </button>
-                <button class="p-0.5 rounded opacity-0 hover:opacity-100 hover:bg-red-500/20" style="color: #f14c4c;" onclick={(e) => { e.stopPropagation(); closeProject(proj) }} title={$t('sidebar.closeProject')}>
+                <button class="p-0.5 rounded opacity-0 hover:opacity-100 hover:bg-red-500/20" style="color: var(--error);" onclick={(e) => { e.stopPropagation(); closeProject(proj) }} title={$t('sidebar.closeProject')}>
                   <svg viewBox="0 0 16 16" class="w-3 h-3" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-width="2" d="M4 4l8 8M12 4l-8 8"/></svg>
                 </button>
               </div>

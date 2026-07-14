@@ -43,10 +43,10 @@ func (t *MultiEditTool) Execute(ctx context.Context, args map[string]any) (strin
 
 	// Phase 1: Read all files and validate edits
 	type fileEdit struct {
-		path     string
-		oldStr   string
-		newStr   string
-		content  string
+		path    string
+		oldStr  string
+		newStr  string
+		content string
 	}
 	var edits []fileEdit
 

@@ -118,9 +118,9 @@ let acceptedCount = $derived(acceptedHunks.size)
       {acceptedCount}/{hunks.length} hunks selected
     </span>
     <div class="flex items-center gap-1.5">
-      <button class="diff-btn" style="color: var(--text-secondary);" onclick={rejectAll}>Reject All</button>
-      <button class="diff-btn" style="color: var(--success);" onclick={acceptAll}>Accept All</button>
-      <button class="diff-btn-apply" onclick={applyAccepted} disabled={acceptedCount === 0}>
+      <button class="btn btn-ghost btn-sm" onclick={rejectAll}>Reject All</button>
+      <button class="btn btn-sm" style="color: var(--success);" onclick={acceptAll}>Accept All</button>
+      <button class="btn btn-primary btn-sm" onclick={applyAccepted} disabled={acceptedCount === 0}>
         Apply {acceptedCount > 0 ? acceptedCount : ''}
       </button>
     </div>

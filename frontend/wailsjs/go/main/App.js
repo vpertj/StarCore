@@ -294,6 +294,14 @@ export function GetTools() {
   return window['go']['main']['App']['GetTools']();
 }
 
+export function GetTraceEvents(arg1) {
+  return window['go']['main']['App']['GetTraceEvents'](arg1);
+}
+
+export function GetTraces(arg1, arg2) {
+  return window['go']['main']['App']['GetTraces'](arg1, arg2);
+}
+
 export function GetWorkspaceRoots() {
   return window['go']['main']['App']['GetWorkspaceRoots']();
 }

@@ -39,8 +39,8 @@ func (t *DeleteFileTool) Execute(ctx context.Context, args map[string]any) (stri
 	}
 	path = strings.TrimSpace(path)
 
-	if SandboxConfig != nil {
-		if err := SandboxConfig.ValidatePath(path); err != nil {
+	if cfg := GetSandboxConfig(); cfg != nil {
+		if err := cfg.ValidatePath(path); err != nil {
 			return "", fmt.Errorf("path validation failed: %w", err)
 		}
 	}

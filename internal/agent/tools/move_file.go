@@ -47,11 +47,11 @@ func (t *MoveFileTool) Execute(ctx context.Context, args map[string]any) (string
 		return "", fmt.Errorf("dest is required")
 	}
 
-	if SandboxConfig != nil {
-		if err := SandboxConfig.ValidatePath(source); err != nil {
+	if cfg := GetSandboxConfig(); cfg != nil {
+		if err := cfg.ValidatePath(source); err != nil {
 			return "", fmt.Errorf("source path validation failed: %w", err)
 		}
-		if err := SandboxConfig.ValidatePath(dest); err != nil {
+		if err := cfg.ValidatePath(dest); err != nil {
 			return "", fmt.Errorf("dest path validation failed: %w", err)
 		}
 	}

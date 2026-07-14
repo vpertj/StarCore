@@ -64,6 +64,29 @@ func TestEstimateTokens(t *testing.T) {
 	}
 }
 
+func TestEstimateTokensWithModel(t *testing.T) {
+	// DeepSeek should give lower estimates for Chinese
+	cnText := "你好世界这是一个测试"
+	defaultEst := estimateTokensWithModel(cnText, "")
+	dsEst := estimateTokensWithModel(cnText, "deepseek-chat")
+	if dsEst >= defaultEst {
+		t.Errorf("DeepSeek CJK estimate (%d) should be lower than default (%d)", dsEst, defaultEst)
+	}
+
+	// Claude should give higher estimates for CJK
+	claudeEst := estimateTokensWithModel(cnText, "claude-3-5-sonnet")
+	if claudeEst <= defaultEst {
+		t.Errorf("Claude CJK estimate (%d) should be higher than default (%d)", claudeEst, defaultEst)
+	}
+
+	// English should be similar across models
+	enText := "This is a test of English token estimation"
+	gptEst := estimateTokensWithModel(enText, "gpt-4o")
+	if gptEst <= 0 {
+		t.Error("GPT English estimate should be positive")
+	}
+}
+
 func TestIsSimpleMessage(t *testing.T) {
 	tests := []struct {
 		msgs []provider.Message
@@ -73,27 +96,38 @@ func TestIsSimpleMessage(t *testing.T) {
 		{[]provider.Message{{Role: "user", Content: "你好"}}, true},
 		{[]provider.Message{{Role: "user", Content: "fix the bug"}}, false},
 		{[]provider.Message{{Role: "user", Content: "请帮我重构这个函数"}}, false},
-		{[]provider.Message{{Role: "user", Content: "This is a long message that exceeds ten chars"}}, false},
+		{[]provider.Message{{Role: "user", Content: "This is a long message that exceeds ten chars"}}, true}, // 48 chars, no tech keyword
+		{[]provider.Message{{Role: "user", Content: "你看看我现在的项目还有什么问题吗"}}, false},                             // contains "问题" — tech keyword
+		{[]provider.Message{{Role: "user", Content: "帮我看看这个项目怎么样"}}, true},                                   // conversational, no tech keyword
 	}
 	for i, tt := range tests {
 		got := isSimpleMessage(tt.msgs)
 		if got != tt.want {
-			t.Errorf("test %d: isSimpleMessage = %v, want %v", i, got, tt.want)
+			t.Errorf("test %d: isSimpleMessage(%q) = %v, want %v", i, tt.msgs[len(tt.msgs)-1].Content, got, tt.want)
 		}
 	}
 }
 
 func TestBuildToolSuppressHint(t *testing.T) {
+	// Simple non-tech message → should suppress
 	msgs := []provider.Message{{Role: "user", Content: "hi"}}
 	hint := buildToolSuppressHint(msgs)
 	if hint == "" {
 		t.Error("should return suppress hint for simple message")
 	}
 
+	// Tech message → should NOT suppress
 	msgs2 := []provider.Message{{Role: "user", Content: "fix the bug"}}
 	hint2 := buildToolSuppressHint(msgs2)
 	if hint2 != "" {
 		t.Error("should not suppress for technical message")
+	}
+
+	// Longer conversational message → should suppress (≤50 chars, no tech keyword)
+	msgs3 := []provider.Message{{Role: "user", Content: "你看看这个项目怎么样"}}
+	hint3 := buildToolSuppressHint(msgs3)
+	if hint3 == "" {
+		t.Error("should suppress for conversational message")
 	}
 }
 
@@ -102,5 +136,60 @@ func TestPreCheckProvider_EmptyProviderID(t *testing.T) {
 	err := preCheckProvider(mgr, "nonexistent")
 	if err == nil {
 		t.Error("should error for nonexistent provider")
+	}
+}
+
+func TestPruneMessages(t *testing.T) {
+	// Create many system messages to simulate accumulated context
+	msgs := make([]provider.Message, 0, 100)
+	// 15 system messages (simulating accumulated Rules, Structure, Knowledge, RAG, summaries, etc.)
+	for i := 0; i < 15; i++ {
+		msgs = append(msgs, provider.Message{Role: "system", Content: "system msg"})
+	}
+	// 80 non-system messages
+	for i := 0; i < 80; i++ {
+		msgs = append(msgs, provider.Message{Role: "user", Content: "user msg"})
+		msgs = append(msgs, provider.Message{Role: "assistant", Content: "assistant msg"})
+	}
+	// Total: 15 system + 160 non-system = 175 > 80 threshold
+
+	result := pruneMessages(msgs, 60)
+
+	// Should have trimmed system messages (prefix 6 + marker 1 + suffix 4 = 11 system)
+	sysCount := 0
+	for _, m := range result {
+		if m.Role == "system" {
+			sysCount++
+		}
+	}
+	if sysCount > 12 {
+		t.Errorf("system messages not trimmed: got %d, want <= 12", sysCount)
+	}
+
+	// Non-system messages should be <= 60 + possible summary marker
+	otherCount := 0
+	for _, m := range result {
+		if m.Role != "system" {
+			otherCount++
+		}
+	}
+	if otherCount > 61 {
+		t.Errorf("non-system messages not trimmed: got %d, want <= 61", otherCount)
+	}
+
+	// Total should be less than original
+	if len(result) >= len(msgs) {
+		t.Error("pruneMessages did not reduce message count")
+	}
+}
+
+func TestPruneMessages_NoTrimNeeded(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: "system", Content: "sys1"},
+		{Role: "user", Content: "user1"},
+	}
+	result := pruneMessages(msgs, 60)
+	if len(result) != len(msgs) {
+		t.Errorf("should not trim small message list: got %d, want %d", len(result), len(msgs))
 	}
 }

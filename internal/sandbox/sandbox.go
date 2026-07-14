@@ -5,7 +5,6 @@ import (
 	"log"
 	"net"
 	"net/url"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -21,7 +20,7 @@ type Config struct {
 
 func DefaultConfig(projectDir string) *Config {
 	return &Config{
-		AllowedDirs:   []string{projectDir, os.TempDir()},
+		AllowedDirs:   []string{projectDir},
 		BlockedCmds:   DefaultBlockedCmds(),
 		AllowedCmds:   []string{},
 		MaxOutputSize: 100 * 1024,
@@ -85,7 +84,10 @@ func (c *Config) ValidateCommand(command string, workDir string) error {
 		}
 	}
 
-	shellMetachars := []string{"&", "|", ";", "$(", "`", ">", "<", "&&", "||", ">>", "<<", "\n"}
+	shellMetachars := []string{"&", "|", ";", "$(", "`", ">", "<", "&&", "||", ">>", "<<", "\n", "\r",
+		"!", "~", "{", "}", "*", "?", "\\", "'", "\"", "$",
+		"|&", ">>", "<<", "<<<",
+	}
 	for _, mc := range shellMetachars {
 		if strings.Contains(command, mc) {
 			return fmt.Errorf("command contains shell metacharacter %q which is not allowed", mc)

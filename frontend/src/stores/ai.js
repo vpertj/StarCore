@@ -52,6 +52,21 @@ export const toolCalls = writable(/** @type {{id: string, name: string, args: an
 export const pendingAsk = writable(/** @type {{id: string, question: string, options: string[]}|null} */ (null))
 export const loopExhausted = writable(/** @type {{maxLoops: number, mode: string, progress: string}|null} */ (null))
 
+// Phase 3+: Understander result
+export const understanderResult = writable(/** @type {{intent: string, confidence: number, ambiguity: string, language: string, files: string[], functions: string[], autoProceed: boolean, mode: string}|null} */ (null))
+// Phase 3+: Clarification request
+export const clarificationNeeded = writable(/** @type {{question: string, options: string[], context: string, priority: number}|null} */ (null))
+// Phase 4+: DAG plan
+export const dagPlan = writable(/** @type {{planID: string, name: string, total: number, nodes: {id: string, label: string, status: string, mode: string, deps: string[]}[]}|null} */ (null))
+// Phase 4+: Task decomposition
+export const taskDecomposed = writable(/** @type {{complexity: number, subtasks: number}|null} */ (null))
+// Phase 6+: Trace viewer state
+export const traceHeaders = writable(/** @type {{id: string, conversation_id: string, total_loops: number, total_tools: number, total_errors: number, token_in: number, token_out: number, duration_ms: number, event_count: number, start_time: string, end_time: string, created_at: string}[]} */ ([]))
+export const traceEvents = writable(/** @type {{id: string, type: string, stage: string, agent_id: string, tool_name: string, message: string, loop_num: number, token_in: number, token_out: number, timestamp: string}[]} */ ([]))
+export const selectedTraceId = writable(null)
+export const showTraceViewer = writable(false)
+export const traceViewerTab = writable('current')
+
 /**
  * @param {string|Error} err
  * @returns {{ type: string, title: string, message: string, action: string, actionLabel: string }}
@@ -107,7 +122,7 @@ export function retryLastMessage() {
 /** Heuristically detect intent mode from message content */
 function detectMode(content) {
   const lower = content.toLowerCase()
-  const planWords = ['plan', 'analyze', 'review', 'design', 'architect', 'outline', 'steps', '分析', '规划', '审查', '检查', '看看', '有什么问题', '设计']
+  const planWords = ['plan', 'analyze', 'review', 'design', 'architect', 'outline', 'steps', '分析', '规划', '审查', '检查', '有什么问题', '设计', '审核', '评审']
   const buildWords = ['write', 'create', 'implement', 'fix', 'build', 'make', 'add', 'update', 'change', 'refactor', 'modify', 'delete', 'remove', '写', '修复', '改', '加', '创建', '生成', '实现', '构建', '删', '重构', '优化', '帮我', '帮忙', '处理', '修改']
   let scorePlan = 0, scoreBuild = 0
   for (const w of planWords) { if (lower.includes(w)) scorePlan++ }
@@ -606,6 +621,30 @@ export async function sendMessage(content, attachedFiles) {
         loopExhausted.set(data)
       })
 
+      // Phase 3+: Understander result
+      const understanderEvent = 'ai:understander:result'
+      const offUnderstander = EventsOn(understanderEvent, (/** @type {any} */ data) => {
+        understanderResult.set(data)
+      })
+
+      // Phase 3+: Clarification needed
+      const clarificationEvent = 'ai:clarification:needed'
+      const offClarification = EventsOn(clarificationEvent, (/** @type {any} */ data) => {
+        clarificationNeeded.set({ question: data.question, options: data.options || [], context: data.context || '', priority: data.priority || 1 })
+      })
+
+      // Phase 4+: DAG plan
+      const dagPlanEvent = 'ai:dag:plan'
+      const offDagPlan = EventsOn(dagPlanEvent, (/** @type {any} */ data) => {
+        dagPlan.set(data)
+      })
+
+      // Phase 4+: Task decomposed
+      const taskDecomposedEvent = 'ai:task:decomposed'
+      const offTaskDecomposed = EventsOn(taskDecomposedEvent, (/** @type {any} */ data) => {
+        taskDecomposed.set(data)
+      })
+
       function cleanup() {
         if (streamTimeoutId) { clearTimeout(streamTimeoutId); streamTimeoutId = null }
         if (firstChunkTimeoutId) { clearTimeout(firstChunkTimeoutId); firstChunkTimeoutId = null }
@@ -619,6 +658,10 @@ export async function sendMessage(content, attachedFiles) {
         offSummarized()
         offAskUser()
         offLoopExhausted()
+        offUnderstander()
+        offClarification()
+        offDagPlan()
+        offTaskDecomposed()
         EventsOff(dataEvent)
         EventsOff(thinkingEvent)
         EventsOff(doneEvent)
@@ -628,8 +671,14 @@ export async function sendMessage(content, attachedFiles) {
         EventsOff(summarizedEvent)
         EventsOff(askUserEvent)
         EventsOff(loopExhaustedEvent)
+        EventsOff(understanderEvent)
+        EventsOff(clarificationEvent)
+        EventsOff(dagPlanEvent)
+        EventsOff(taskDecomposedEvent)
         pendingAsk.set(null)
         loopExhausted.set(null)
+        dagPlan.set(null)
+        taskDecomposed.set(null)
         isGenerating.set(false)
         currentCleanup = null
         persistMessages()
@@ -729,4 +778,42 @@ export async function persistMessages() {
     console.error('Failed to persist messages:', e)
   }
 }
+
+// --- Phase 6+: Trace query functions ---
+
+/**
+ * Load trace headers for a conversation.
+ * @param {string} convID
+ * @param {number} [limit]
+ */
+export async function loadTraces(convID, limit = 20) {
+  try {
+    if (!window.backend?.GetTraces) return
+    const traces = await window.backend.GetTraces(convID, limit)
+    traceHeaders.set(traces || [])
+  } catch (e) {
+    console.error('Failed to load traces:', e)
+  }
+}
+
+/**
+ * Load events for a specific trace.
+ * @param {string} traceID
+ */
+export async function loadTraceEvents(traceID) {
+  try {
+    if (!window.backend?.GetTraceEvents) return
+    const events = await window.backend.GetTraceEvents(traceID)
+    traceEvents.set(events || [])
+    selectedTraceId.set(traceID)
+  } catch (e) {
+    console.error('Failed to load trace events:', e)
+  }
+}
+
+/** Open the trace viewer panel. */
+export function openTraceViewer() { showTraceViewer.set(true) }
+
+/** Close the trace viewer panel. */
+export function closeTraceViewer() { showTraceViewer.set(false) }
 

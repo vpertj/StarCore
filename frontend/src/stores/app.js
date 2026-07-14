@@ -206,12 +206,31 @@ export async function loadDirectoryContents(node) {
 /**
  * @param {string} filePath
  */
-export function openFile(filePath) {
+/**
+ * Open a file in the specified group (defaults to group-1).
+ * @param {string} filePath
+ * @param {string} [groupId]
+ */
+export function openFile(filePath, groupId) {
+  if (groupId && groupId !== 'group-1') {
+    editorGroups.update(groups => {
+      return groups.map(g => {
+        if (g.id !== groupId) return g
+        const hasFile = g.files.some(f => f.path === filePath)
+        const files = hasFile ? g.files : [...g.files, { path: filePath, name: filePath.split(/[\\/]/).pop() || '' }]
+        return { ...g, files, activeFile: filePath }
+      })
+    })
+    activeGroupId.set(groupId)
+    return
+  }
+  // Default: open in group-1
   openedFiles.update(files => {
     if (files.some(f => f.path === filePath)) return files
     return [...files, { path: filePath, name: filePath.split(/[\\/]/).pop() || '' }]
   })
   activeFile.set(filePath)
+  activeGroupId.set('group-1')
 }
 
 /**

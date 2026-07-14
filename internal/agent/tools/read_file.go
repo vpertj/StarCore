@@ -67,8 +67,8 @@ func (t *ReadFileTool) Execute(ctx context.Context, args map[string]any) (string
 
 	path = strings.TrimSpace(path)
 
-	if SandboxConfig != nil {
-		if err := SandboxConfig.ValidatePath(path); err != nil {
+	if cfg := GetSandboxConfig(); cfg != nil {
+		if err := cfg.ValidatePath(path); err != nil {
 			return "", fmt.Errorf("path validation failed: %w", err)
 		}
 	}

@@ -3,6 +3,7 @@ package sandbox
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -98,8 +99,13 @@ func (l *AuditLogger) writeEntry(entry AuditEntry) {
 		return
 	}
 
-	l.file.Write(data)
-	l.file.Write([]byte("\n"))
+	if _, err := l.file.Write(data); err != nil {
+		log.Printf("WARNING: failed to write audit entry: %v", err)
+		return
+	}
+	if _, err := l.file.Write([]byte("\n")); err != nil {
+		log.Printf("WARNING: failed to write audit newline: %v", err)
+	}
 }
 
 func CloseAuditLogger() {

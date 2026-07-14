@@ -64,8 +64,8 @@ type anthropicCacheControl struct {
 }
 
 type anthropicSystemBlock struct {
-	Type         string               `json:"type"`
-	Text         string               `json:"text"`
+	Type         string                 `json:"type"`
+	Text         string                 `json:"text"`
 	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }
 
@@ -164,7 +164,7 @@ func convertToAnthropicMessages(messages []Message) (string, []anthropicMessage)
 			content = append(content, anthropicContent{
 				Type:      "tool_result",
 				ToolUseID: msg.ToolCallID,
-				Content:   json.RawMessage(fmt.Sprintf("%q", msg.Content)),
+				Content:   json.RawMessage(`"` + msg.Content + `"`),
 			})
 		default:
 			content = append(content, anthropicContent{Type: "text", Text: msg.Content})

@@ -92,3 +92,31 @@ func TestCheckResult_Timeout(t *testing.T) {
 		t.Error("expected check to fail")
 	}
 }
+
+func TestDetectLanguagesFromFiles(t *testing.T) {
+	svc := NewService("")
+
+	tests := []struct {
+		files    []string
+		expected int
+	}{
+		{[]string{"main.go", "util.go"}, 1},             // single language
+		{[]string{"app.ts", "util.js"}, 2},              // two JS-family languages
+		{[]string{"main.go", "app.ts", "script.py"}, 3}, // three languages
+		{[]string{"README.md", "Dockerfile"}, 0},        // no known languages
+		{[]string{}, 0},                                 // empty
+	}
+
+	for _, tt := range tests {
+		langs := svc.detectLanguagesFromFiles(tt.files)
+		if len(langs) != tt.expected {
+			t.Errorf("detectLanguagesFromFiles(%v) = %d langs, want %d", tt.files, len(langs), tt.expected)
+		}
+	}
+
+	// Verify uniqueness
+	langs := svc.detectLanguagesFromFiles([]string{"a.go", "b.go", "c.go"})
+	if len(langs) != 1 || langs[0] != "go" {
+		t.Errorf("expected single 'go', got %v", langs)
+	}
+}

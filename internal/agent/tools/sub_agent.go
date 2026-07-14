@@ -19,6 +19,13 @@ var SubAgentToolExec *agent.ToolExecutor
 var SubAgentProviderMgr *provider.Manager
 var SubAgentMemoryStore *memory.Store
 
+// SubAgentProgressFn is called at each sub-agent round with progress info.
+// The arguments are: round number, max rounds, task description.
+var SubAgentProgressFn func(round, maxRounds int, task string)
+
+// SubAgentParentContext carries the parent agent's project state for sub-agent context.
+var SubAgentParentContext string
+
 var subAgentProviderMu sync.RWMutex
 var subAgentProviderID string
 
@@ -189,12 +196,18 @@ func runSingleSubAgent(ctx context.Context, task string, extContext string, mode
 	var systemPrompt string
 	var tools []string
 
+	// Inject parent agent context so sub-agent knows what's already been done
+	parentContextInjection := ""
+	if SubAgentParentContext != "" {
+		parentContextInjection = fmt.Sprintf("[父Agent上下文 — 以下是父Agent的当前状态，避免重复工作]\n%s\n\n", SubAgentParentContext)
+	}
+
 	switch mode {
 	case "build":
-		systemPrompt = "You are a focused implementation sub-agent. You can read files, write files, edit files, search code, execute commands, and invoke skills. Implement the task precisely. After implementation, verify your changes work correctly. Be thorough and concise."
+		systemPrompt = parentContextInjection + "You are a focused implementation sub-agent. You can read files, write files, edit files, search code, execute commands, and invoke skills. Implement the task precisely. After implementation, verify your changes work correctly. Be thorough and concise.\n\nIMPORTANT: The parent agent context above shows what has already been done. Do NOT repeat or undo work that is already complete. Focus only on your assigned sub-task."
 		tools = []string{"read_file", "write_file", "edit_file", "glob_files", "search_files", "list_directory", "get_git_diff", "execute_command", "skill"}
 	default:
-		systemPrompt = "You are a focused analysis sub-agent. Use read_file, search_files, list_directory, get_git_diff to investigate. You can also invoke skills for specialized analysis. Be thorough. After analysis, write a clear summary with specific findings, file paths, and code. Do NOT write or modify any files. Be concise."
+		systemPrompt = parentContextInjection + "You are a focused analysis sub-agent. Use read_file, search_files, list_directory, get_git_diff to investigate. You can also invoke skills for specialized analysis. Be thorough. After analysis, write a clear summary with specific findings, file paths, and code. Do NOT write or modify any files. Be concise.\n\nIMPORTANT: The parent agent context above shows what has already been done. Avoid re-reading files the parent has already examined unless necessary. Focus only on your assigned sub-task."
 		tools = []string{"read_file", "glob_files", "search_files", "list_directory", "get_git_diff", "skill"}
 	}
 
@@ -220,6 +233,11 @@ func runSingleSubAgent(ctx context.Context, task string, extContext string, mode
 
 	for loop := 0; loop < maxLoops; loop++ {
 		roundCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+
+		// Report progress to parent agent
+		if SubAgentProgressFn != nil {
+			SubAgentProgressFn(loop+1, maxLoops, task)
+		}
 
 		// Log progress (sub-agent progress is visible in parent's tool result)
 		if loop > 0 {
@@ -313,20 +331,21 @@ func runSingleSubAgent(ctx context.Context, task string, extContext string, mode
 			if tc.Function.Arguments != "" {
 				json.Unmarshal([]byte(tc.Function.Arguments), &call.Args)
 			}
-			// Check approval for dangerous tools in sub-agents
+			// Check approval for dangerous tools in sub-agents.
+			// Sub-agents ALWAYS require approval for write/exec/git operations,
+			// regardless of the parent agent's auto-approval setting. This prevents
+			// sub-agents from making changes without explicit user consent.
 			needsApproval := tc.Function.Name == "write_file" || tc.Function.Name == "edit_file" ||
 				tc.Function.Name == "execute_command" || tc.Function.Name == "git_commit"
 			if needsApproval && SubAgentToolExec != nil {
-				if !SubAgentToolExec.IsAutoApproved(tc.Function.Name) {
-					// Sub-agent write/exec requires parent approval
-					currentReq.Messages = append(currentReq.Messages, provider.Message{
-						Role:    "tool",
-						Content: fmt.Sprintf("Tool '%s' requires approval. Please ask the user to approve this action.", tc.Function.Name),
-						ToolCallID: tc.ID,
-						Name:    tc.Function.Name,
-					})
-					continue
-				}
+				// Always require approval for sub-agent dangerous ops — ignore parent auto-approval
+				currentReq.Messages = append(currentReq.Messages, provider.Message{
+					Role:       "tool",
+					Content:    fmt.Sprintf("⚠️ 子Agent的 '%s' 操作需要用户批准才能执行。", tc.Function.Name),
+					ToolCallID: tc.ID,
+					Name:       tc.Function.Name,
+				})
+				continue
 			}
 			if SubAgentToolExec != nil {
 				toolResult, err := SubAgentToolExec.Execute(ctx, call)

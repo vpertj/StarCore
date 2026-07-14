@@ -11,14 +11,14 @@ import (
 
 // CodeStructure holds extracted code elements from a file.
 type CodeStructure struct {
-	FilePath  string   `json:"filePath"`
-	Language  string   `json:"language"`
-	Imports   []string `json:"imports,omitempty"`
-	Functions []string `json:"functions,omitempty"`
-	Types     []string `json:"types,omitempty"`
+	FilePath   string   `json:"filePath"`
+	Language   string   `json:"language"`
+	Imports    []string `json:"imports,omitempty"`
+	Functions  []string `json:"functions,omitempty"`
+	Types      []string `json:"types,omitempty"`
 	Interfaces []string `json:"interfaces,omitempty"`
-	Constants []string `json:"constants,omitempty"`
-	Lines     int      `json:"lines"`
+	Constants  []string `json:"constants,omitempty"`
+	Lines      int      `json:"lines"`
 }
 
 // ExtractCodeStructure extracts code structure from a file using regex-based analysis.

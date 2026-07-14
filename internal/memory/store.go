@@ -16,6 +16,11 @@ type Store struct {
 	mu sync.RWMutex
 }
 
+// DB returns the underlying database handle (for sharing with trace storage, etc.)
+func (s *Store) DB() *sql.DB {
+	return s.db
+}
+
 func NewStore(dataDir string) (*Store, error) {
 	if dataDir == "" {
 		configDir, err := os.UserConfigDir()
@@ -146,4 +151,15 @@ func generateID() string {
 
 func now() string {
 	return time.Now().Format(time.RFC3339)
+}
+
+// DeleteConversationMessages deletes all messages for a given conversation.
+func (s *Store) DeleteConversationMessages(convID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`DELETE FROM messages WHERE conversation_id = ?`, convID)
+	if err != nil {
+		return fmt.Errorf("delete conversation messages: %w", err)
+	}
+	return nil
 }

@@ -281,9 +281,40 @@
         transform: scale(0.97);
     }
 
+    .btn-danger-ghost {
+        background-color: transparent;
+        color: var(--error);
+        border-color: transparent;
+    }
+    .btn-danger-ghost:hover {
+        background-color: color-mix(in srgb, var(--error) 12%, transparent);
+        color: var(--error);
+    }
+    .btn-danger-ghost:active {
+        transform: scale(0.97);
+    }
+
+    .btn-accent-ghost {
+        background-color: transparent;
+        color: var(--accent);
+        border-color: transparent;
+    }
+    .btn-accent-ghost:hover {
+        background-color: color-mix(in srgb, var(--accent) 12%, transparent);
+        color: var(--accent);
+    }
+    .btn-accent-ghost:active {
+        transform: scale(0.97);
+    }
+
     .btn-sm {
         padding: 2px 8px;
         font-size: 11px;
+    }
+
+    .btn-xs {
+        padding: 1px 6px;
+        font-size: 10px;
     }
 
     .btn-icon {

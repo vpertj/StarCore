@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync/atomic"
 
 	"StarCore/internal/agent"
 )
 
 // LoopStateRef is set by the Service after tool creation so that
 // todo_write can access the shared agent loop state.
-var LoopStateRef *LoopState
+var loopStateRef atomic.Pointer[LoopState]
 
 type TodoWriteTool struct{}
 
@@ -37,7 +38,7 @@ func (t *TodoWriteTool) Parameters() agent.ToolParameters {
 
 func (t *TodoWriteTool) Execute(ctx context.Context, args map[string]any) (string, error) {
 	_ = ctx
-	if LoopStateRef == nil {
+	if loopStateRef.Load() == nil {
 		return "todo list stored (no persistent state)", nil
 	}
 
@@ -58,7 +59,9 @@ func (t *TodoWriteTool) Execute(ctx context.Context, args map[string]any) (strin
 		items[i].ActiveForm = strings.TrimSpace(items[i].ActiveForm)
 	}
 
-	LoopStateRef.SetTodos(items)
+	if ls := loopStateRef.Load(); ls != nil {
+		ls.SetTodos(items)
+	}
 
 	if len(items) == 0 {
 		return "Task list cleared.", nil
@@ -90,4 +93,9 @@ func parseTodoItems(raw any) ([]TodoItem, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+// SetLoopStateRef sets the shared agent loop state reference (thread-safe).
+func SetLoopStateRef(ls *LoopState) {
+	loopStateRef.Store(ls)
 }

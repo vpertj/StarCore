@@ -13,6 +13,7 @@ import {agent} from '../models';
 import {memory} from '../models';
 import {extension} from '../models';
 import {lsp} from '../models';
+import {ai} from '../models';
 import {workspace} from '../models';
 import {git} from '../models';
 import {verify} from '../models';
@@ -165,6 +166,10 @@ export function GetSkills():Promise<Array<skill.SkillDef>>;
 export function GetTokenUsage(arg1:string):Promise<memory.TokenUsageStats>;
 
 export function GetTools():Promise<Array<agent.ToolDef>>;
+
+export function GetTraceEvents(arg1:string):Promise<Array<ai.TraceEvent>>;
+
+export function GetTraces(arg1:string,arg2:number):Promise<Array<ai.TraceHeader>>;
 
 export function GetWorkspaceRoots():Promise<Array<workspace.WorkspaceRoot>>;
 

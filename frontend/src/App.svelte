@@ -1,6 +1,6 @@
 <script>
 import { bottomPanelVisible, bottomPanelTab, aiPanelVisible } from './stores/ui.js'
-import { settingsVisible, activeFile, editorGroups } from './stores/app.js'
+import { settingsVisible, activeFile, editorGroups, splitEditor, closeSplit } from './stores/app.js'
  import { initCustomModels } from './stores/provider.js'
   import { EventsOn } from '../wailsjs/runtime/runtime.js'
   import { editorSettings, updateEditorSetting, initEditorSettings } from './stores/editorSettings.js'
@@ -17,6 +17,7 @@ import StatusBar from './components/StatusBar.svelte'
 import Settings from './components/Settings.svelte'
 import CommandPalette from './components/CommandPalette.svelte'
 import Breadcrumb from './components/Breadcrumb.svelte'
+import ToastContainer from './components/ToastContainer.svelte'
 
 let isSplitDragging = $state(false)
 
@@ -61,6 +62,9 @@ onMount(() => {
 
   // Debug keyboard shortcuts
   window.addEventListener('keydown', handleDebugKeys)
+
+  // Split editor keyboard shortcut: Ctrl+\
+  window.addEventListener('keydown', handleSplitKey)
 
   EventsOn('app:session_restore', async (state) => {
     if (!state?.activeConvId) return
@@ -126,6 +130,19 @@ async function handleDebugKeys(e) {
   }
 }
 
+/** @param {KeyboardEvent} e */
+function handleSplitKey(e) {
+  if (e.target?.tagName === 'INPUT' || e.target?.tagName === 'TEXTAREA') return
+  if ((e.ctrlKey || e.metaKey) && e.key === '\\') {
+    e.preventDefault()
+    if ($editorGroups.length > 1) {
+      closeSplit()
+    } else {
+      splitEditor()
+    }
+  }
+}
+
 /** @param {WheelEvent} e */
 function handleWheel(e) {
   if (!e.ctrlKey && !e.metaKey) return
@@ -144,6 +161,7 @@ onDestroy(() => {
   if (welcomeUnsub) { welcomeUnsub(); welcomeUnsub = null }
   document.removeEventListener('wheel', handleWheel)
   window.removeEventListener('keydown', handleDebugKeys)
+  window.removeEventListener('keydown', handleSplitKey)
 })
 </script>
 
@@ -173,7 +191,13 @@ onDestroy(() => {
               onmousedown={startSplitResize}
               role="separator"
               aria-orientation="vertical"
-            ></div>
+            >
+              <button class="split-close-btn" onclick={() => closeSplit()} title="Close split">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
             {@const group2 = $editorGroups.find(g => g.id === 'group-2')}
             <div class="editor-pane" style="flex: {1 - splitRatio};">
               <TabBar groupId="group-2" />
@@ -197,6 +221,7 @@ onDestroy(() => {
 
 <Settings />
 <CommandPalette />
+<ToastContainer />
 
 {#if showWelcome}
   <div class="fixed inset-0 z-[200] flex items-center justify-center" style="background: rgba(0,0,0,0.7); backdrop-filter: blur(4px);" role="dialog" aria-label="欢迎使用 StarCore">
@@ -279,14 +304,50 @@ onDestroy(() => {
 }
 
 .split-divider {
-  width: 3px;
+  width: 4px;
   cursor: col-resize;
   background-color: var(--border);
   flex-shrink: 0;
+  position: relative;
+  transition: background-color 0.15s;
+}
+
+.split-divider:hover {
+  background-color: var(--accent);
 }
 
 .split-divider.active {
   background-color: var(--accent);
+}
+
+.split-close-btn {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 10;
+  pointer-events: auto;
+}
+
+.split-divider:hover .split-close-btn {
+  opacity: 1;
+}
+
+.split-close-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 /* Responsive: collapse AIPanel on narrow windows */

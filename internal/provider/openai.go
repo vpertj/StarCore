@@ -66,9 +66,9 @@ type openAIResponse struct {
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
+		PromptTokens        int `json:"prompt_tokens"`
+		CompletionTokens    int `json:"completion_tokens"`
+		TotalTokens         int `json:"total_tokens"`
 		PromptTokensDetails *struct {
 			CachedTokens int `json:"cached_tokens"`
 		} `json:"prompt_tokens_details,omitempty"`
@@ -101,9 +101,9 @@ type openAIStreamChunk struct {
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
+		PromptTokens        int `json:"prompt_tokens"`
+		CompletionTokens    int `json:"completion_tokens"`
+		TotalTokens         int `json:"total_tokens"`
 		PromptTokensDetails *struct {
 			CachedTokens int `json:"cached_tokens"`
 		} `json:"prompt_tokens_details,omitempty"`
@@ -608,34 +608,7 @@ func (p *OpenAIProvider) Validate(ctx context.Context) error {
 // ---- shared helpers ----
 
 func EstimateContextWindow(model string) int {
-	model = strings.ToLower(model)
-	switch {
-	case strings.Contains(model, "gpt-4o") || strings.Contains(model, "o1") || strings.Contains(model, "o3"):
-		return 200000
-	case strings.Contains(model, "gpt-4"):
-		return 128000
-	case strings.Contains(model, "claude-3-opus") || strings.Contains(model, "claude-opus-4"):
-		return 200000
-	case strings.Contains(model, "claude-3.5") || strings.Contains(model, "claude-sonnet-4") ||
-		strings.Contains(model, "claude-3-sonnet") || strings.Contains(model, "claude-3-haiku") ||
-		strings.Contains(model, "claude-haiku-4"):
-		return 200000
-	case strings.Contains(model, "deepseek-v4") || strings.Contains(model, "deepseek-r1"):
-		return 1048576
-	case strings.Contains(model, "deepseek"):
-		return 65536
-	case strings.Contains(model, "gemini-2") || strings.Contains(model, "gemma"):
-		return 1048576
-	case strings.Contains(model, "gemini"):
-		return 32768
-	case strings.Contains(model, "llama") || strings.Contains(model, "mistral") ||
-		strings.Contains(model, "mixtral") || strings.Contains(model, "qwen"):
-		return 32768
-	case strings.Contains(model, "gpt-3.5"):
-		return 16385
-	default:
-		return 128000
-	}
+	return GetModelCapabilities(model).ContextWindow
 }
 
 func pickTemp(reqTemp, defaultTemp float64) float64 {

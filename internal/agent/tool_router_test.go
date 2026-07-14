@@ -18,7 +18,7 @@ func TestToolRouter_KeywordMatch(t *testing.T) {
 		{"search", "搜索所有使用 printf 的地方", "search_files"},
 		{"read", "读取配置文件", "read_file"},
 		{"git", "提交代码", "git_commit"},
-		{"debug", "修复这个 bug", "read_file"},
+		{"debug", "修复这个 bug", "get_diagnostics"},
 	}
 
 	for _, tt := range tests {

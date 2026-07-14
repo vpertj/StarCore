@@ -179,7 +179,7 @@
   }
 
   .summary-passed { color: #4ec9b0; }
-  .summary-failed { color: #f14c4c; }
+  .summary-failed { color: var(--error); }
   .summary-skipped { color: #cca700; }
 
   .clear-btn {
@@ -201,8 +201,8 @@
   .test-error {
     padding: 6px 10px;
     font-size: 12px;
-    color: #f14c4c;
-    background: rgba(241, 76, 76, 0.08);
+    color: var(--error);
+    background: color-mix(in srgb, var(--error) 8%, transparent);
     border-bottom: 1px solid var(--bg-tertiary);
   }
 
@@ -256,8 +256,7 @@
 
   .suite-icon { flex-shrink: 0; width: 14px; text-align: center; }
   .suite-passed { color: #4ec9b0; }
-  .suite-failed { color: #f14c4c; }
-
+  .suite-failed { color: var(--error); }
   .suite-name {
     flex: 1;
     overflow: hidden;
@@ -267,7 +266,7 @@
   }
 
   .suite-stats { color: var(--text-muted); font-size: 11px; flex-shrink: 0; }
-  .fail-count { color: #f14c4c; }
+  .fail-count { color: var(--error); }
   .suite-duration { color: var(--text-muted); font-size: 11px; flex-shrink: 0; margin-left: 8px; }
 
   .test-cases {
@@ -287,7 +286,7 @@
 
   .case-icon { flex-shrink: 0; width: 14px; text-align: center; margin-top: 1px; }
   .status-passed .case-icon { color: #4ec9b0; }
-  .status-failed .case-icon { color: #f14c4c; }
+  .status-failed .case-icon { color: var(--error); }
   .status-skipped .case-icon { color: #cca700; }
 
   .case-name {

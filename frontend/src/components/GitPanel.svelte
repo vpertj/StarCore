@@ -91,8 +91,8 @@
       {#if showBranchInput}
         <div class="flex gap-1">
           <input type="text" bind:value={newBranchName} placeholder={$t('git.branchPlaceholder')} class="flex-1 px-2 py-1 rounded text-xs" style="background-color: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border);" onkeydown={(e) => { if (e.key === 'Enter') handleCreateBranch(); if (e.key === 'Escape') showBranchInput = false }} autofocus />
-          <button class="git-sm-btn" style="background-color: var(--accent); color: var(--text-on-accent);" onclick={handleCreateBranch}>{$t('git.create')}</button>
-          <button class="git-sm-btn" onclick={() => showBranchInput = false}>{$t('git.cancel')}</button>
+          <button class="btn btn-primary btn-sm" onclick={handleCreateBranch}>{$t('git.create')}</button>
+          <button class="btn btn-ghost btn-sm" onclick={() => showBranchInput = false}>{$t('git.cancel')}</button>
         </div>
       {:else}
         <div class="flex gap-1">
@@ -168,8 +168,8 @@
     ></textarea>
     <div class="flex gap-2">
       <button
-        class="flex-1 px-3 py-1.5 text-sm rounded font-medium transition-colors"
-        style="background-color: {$commitMessage.trim() ? 'var(--success)' : 'var(--border)'}; color: var(--text-on-accent);"
+        class="flex-1 btn btn-success"
+        style="background-color: {$commitMessage.trim() ? 'var(--success)' : 'var(--border)'};"
         disabled={!$commitMessage.trim() || committing || stagedCount === 0}
         onclick={handleCommit}
       >

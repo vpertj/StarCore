@@ -77,7 +77,7 @@
 
   async function handleDelete() {
     if (selectedItem) {
-      if (confirm(`${$t('explorer.confirmDelete')} "${selectedItem.name}"?`)) {
+      if (window.confirm(`${$t('explorer.confirmDelete')} "${selectedItem.name}"?`)) {
         await deleteFileOrFolder(selectedItem.path)
         hideContextMenu()
       }

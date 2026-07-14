@@ -25,5 +25,8 @@ func AllTools() []agent.Tool {
 		NewSubAgentTool(),
 		NewTodoWriteTool(),
 		NewAskUserTool(),
+		NewLSPDefinitionTool(),
+		NewLSPReferencesTool(),
+		NewLSPSymbolsTool(),
 	}
 }

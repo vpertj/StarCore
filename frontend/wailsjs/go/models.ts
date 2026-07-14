@@ -8,8 +8,11 @@ export namespace agent {
 	    systemPrompt: string;
 	    defaultModel: string;
 	    tools: string[];
+	    roles: string[];
 	    skills: string[];
 	    category: string;
+	    capabilities: string[];
+	    priority: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new AgentDef(source);
@@ -24,8 +27,11 @@ export namespace agent {
 	        this.systemPrompt = source["systemPrompt"];
 	        this.defaultModel = source["defaultModel"];
 	        this.tools = source["tools"];
+	        this.roles = source["roles"];
 	        this.skills = source["skills"];
 	        this.category = source["category"];
+	        this.capabilities = source["capabilities"];
+	        this.priority = source["priority"];
 	    }
 	}
 	export class FileMeta {
@@ -189,6 +195,94 @@ export namespace agent {
 		    }
 		    return a;
 		}
+	}
+
+}
+
+export namespace ai {
+	
+	export class TraceEvent {
+	    id: string;
+	    type: string;
+	    stage: string;
+	    agent_id: string;
+	    message: string;
+	    tool_name: string;
+	    loop: number;
+	    token_in: number;
+	    token_out: number;
+	    // Go type: time
+	    timestamp: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new TraceEvent(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.type = source["type"];
+	        this.stage = source["stage"];
+	        this.agent_id = source["agent_id"];
+	        this.message = source["message"];
+	        this.tool_name = source["tool_name"];
+	        this.loop = source["loop"];
+	        this.token_in = source["token_in"];
+	        this.token_out = source["token_out"];
+	        this.timestamp = this.convertValues(source["timestamp"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class TraceHeader {
+	    id: string;
+	    conversation_id: string;
+	    total_loops: number;
+	    total_tools: number;
+	    total_errors: number;
+	    token_in: number;
+	    token_out: number;
+	    duration_ms: number;
+	    event_count: number;
+	    start_time: string;
+	    end_time: string;
+	    created_at: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TraceHeader(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.conversation_id = source["conversation_id"];
+	        this.total_loops = source["total_loops"];
+	        this.total_tools = source["total_tools"];
+	        this.total_errors = source["total_errors"];
+	        this.token_in = source["token_in"];
+	        this.token_out = source["token_out"];
+	        this.duration_ms = source["duration_ms"];
+	        this.event_count = source["event_count"];
+	        this.start_time = source["start_time"];
+	        this.end_time = source["end_time"];
+	        this.created_at = source["created_at"];
+	    }
 	}
 
 }

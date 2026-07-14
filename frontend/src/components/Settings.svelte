@@ -69,7 +69,7 @@
 
   /** @param {string} skillId */
   async function deleteSkill(skillId) {
-    if (!confirm("Delete this skill?")) return;
+    if (!window.confirm("Delete this skill?")) return;
     try {
       await DeleteSkill(skillId);
       loadSkills();
@@ -875,18 +875,8 @@
                 </p>
               </div>
               <div class="flex gap-2">
-                <button
-                  class="px-4 py-2 rounded text-sm font-medium"
-                  style="background-color: var(--accent); color: var(--text-on-accent);"
-                  onclick={() => (showCreateSkillDialog = true)}
-                  >+ 创建新技能</button
-                >
-                <button
-                  class="px-4 py-2 rounded text-sm"
-                  style="background-color: var(--border); color: var(--text-primary);"
-                  onclick={() => (showImportSkillDialog = true)}
-                  >从 URL 安装</button
-                >
+                <button class="btn btn-primary" onclick={() => (showCreateSkillDialog = true)}>+ 创建新技能</button>
+                <button class="btn btn-secondary" onclick={() => (showImportSkillDialog = true)}>从 URL 安装</button>
               </div>
               <div
                 class="rounded-lg overflow-hidden border"
@@ -1073,17 +1063,8 @@
                     </div>
                   </div>
                   <div class="flex justify-end gap-2 mt-4">
-                    <button
-                      class="px-4 py-1.5 rounded text-sm"
-                      style="background-color: var(--border); color: var(--text-primary);"
-                      onclick={() => (showCreateSkillDialog = false)}
-                      >取消</button
-                    >
-                    <button
-                      class="px-4 py-1.5 rounded text-sm font-medium"
-                      style="background-color: var(--accent); color: var(--text-on-accent);"
-                      onclick={createSkill}>创建</button
-                    >
+                    <button class="btn btn-secondary" onclick={() => (showCreateSkillDialog = false)}>取消</button>
+                    <button class="btn btn-primary" onclick={createSkill}>创建</button>
                   </div>
                 </div>
               </div>
@@ -1137,21 +1118,8 @@
                     </div>
                   {/if}
                   <div class="flex justify-end gap-2">
-                    <button
-                      class="px-4 py-1.5 rounded text-sm"
-                      style="background-color: var(--border); color: var(--text-primary);"
-                      onclick={() => {
-                        showImportSkillDialog = false;
-                        importSkillMsg = "";
-                        importSkillUrl = "";
-                      }}>取消</button
-                    >
-                    <button
-                      class="px-4 py-1.5 rounded text-sm font-medium"
-                      style="background-color: var(--accent); color: #fff;"
-                      onclick={installSkillFromUrl}
-                      disabled={importSkillLoading}
-                    >
+                    <button class="btn btn-secondary" onclick={() => { showImportSkillDialog = false; importSkillMsg = ""; importSkillUrl = ""; }}>取消</button>
+                    <button class="btn btn-primary" onclick={installSkillFromUrl} disabled={importSkillLoading}>
                       {importSkillLoading ? "安装中..." : "安装"}
                     </button>
                   </div>
@@ -1231,21 +1199,10 @@ style="background-color: var(--accent); color: var(--text-on-accent);"
           class="flex items-center justify-end gap-3 px-6 py-4 border-t"
           style="border-color: var(--border);"
         >
-          <button
-            class="px-4 py-2 rounded text-sm transition-colors"
-            style="background-color: var(--border); color: var(--text-primary);"
-            onclick={() => settingsVisible.set(false)}
-          >
+          <button class="btn btn-secondary" onclick={() => settingsVisible.set(false)}>
             {$t("settings.cancel")}
           </button>
-          <button
-            class="px-4 py-2 rounded text-sm transition-colors"
-            style="background-color: var(--accent); color: var(--text-on-accent);"
-            onclick={() => {
-              saveSettings();
-              settingsVisible.set(false);
-            }}
-          >
+          <button class="btn btn-primary" onclick={() => { saveSettings(); settingsVisible.set(false); }}>
             {$t("settings.save")}
           </button>
         </div>

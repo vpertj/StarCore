@@ -47,8 +47,8 @@ func (t *EditFileTool) Execute(ctx context.Context, args map[string]any) (string
 		return "", fmt.Errorf("old_string or new_string is required")
 	}
 
-	if SandboxConfig != nil {
-		if err := SandboxConfig.ValidatePath(path); err != nil {
+	if cfg := GetSandboxConfig(); cfg != nil {
+		if err := cfg.ValidatePath(path); err != nil {
 			return "", fmt.Errorf("path validation failed: %w", err)
 		}
 	}
@@ -92,13 +92,28 @@ func (t *EditFileTool) Execute(ctx context.Context, args map[string]any) (string
 	oldPreview := truncate(oldStr, 60)
 	newPreview := truncate(newStr, 60)
 
+	var resultMsg string
 	if oldStr == newStr {
-		return fmt.Sprintf("⏭️ %s unchanged", path), nil
+		resultMsg = fmt.Sprintf("⏭️ %s unchanged", path)
+	} else if oldLines == 0 && newLines == 0 {
+		resultMsg = fmt.Sprintf("✏️ %s: replaced \"%s\" → \"%s\"", path, oldPreview, newPreview)
+	} else {
+		resultMsg = fmt.Sprintf("✏️ %s: replaced %d→%d lines", path, oldLines+1, newLines+1)
 	}
-	if oldLines == 0 && newLines == 0 {
-		return fmt.Sprintf("✏️ %s: replaced \"%s\" → \"%s\"", path, oldPreview, newPreview), nil
+
+	// Quick post-edit syntax check
+	if syntaxErr := QuickSyntaxCheck(path); syntaxErr != "" {
+		resultMsg += "\n" + syntaxErr
 	}
-	return fmt.Sprintf("✏️ %s: replaced %d→%d lines", path, oldLines+1, newLines+1), nil
+
+	// File modification rate limit check
+	if ls := loopStateRef.Load(); ls != nil {
+		if rateMsg := ls.CheckFileRateLimit(path); rateMsg != "" {
+			resultMsg += "\n" + rateMsg
+		}
+	}
+
+	return resultMsg, nil
 }
 
 func snippetAround(content string, pos int, matchLen int) string {

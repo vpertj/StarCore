@@ -965,10 +965,10 @@
         </div>
         <p class="text-xs mb-4" style="color: var(--text-secondary);">This file has been modified by another program. You have unsaved changes.</p>
         <div class="flex gap-2">
-          <button class="flex-1 px-3 py-1.5 text-xs rounded font-medium" style="background-color: var(--accent); color: var(--text-on-accent);" onclick={() => resolveConflict(true)}>
+          <button class="flex-1 btn btn-primary btn-sm" onclick={() => resolveConflict(true)}>
             Keep Mine
           </button>
-          <button class="flex-1 px-3 py-1.5 text-xs rounded font-medium" style="background-color: var(--warning); color: var(--bg-primary);" onclick={() => resolveConflict(false)}>
+          <button class="flex-1 btn btn-sm" style="background-color: var(--warning); color: var(--bg-primary);" onclick={() => resolveConflict(false)}>
             Use External
           </button>
         </div>
@@ -982,10 +982,10 @@
       class="fixed z-50 flex gap-0.5 rounded-md shadow-lg px-1 py-0.5"
       style="left: {aiToolbarPos.x}px; top: {aiToolbarPos.y}px; background-color: var(--bg-secondary); border: 1px solid var(--border);"
     >
-      <button class="ai-toolbar-btn" onclick={() => aiAction('explain')} title="AI 解释">💡</button>
-      <button class="ai-toolbar-btn" onclick={() => aiAction('refactor')} title="AI 重构">🔧</button>
-      <button class="ai-toolbar-btn" onclick={() => aiAction('generate-test')} title="AI 生成测试">🧪</button>
-      <button class="ai-toolbar-btn" onclick={() => aiAction('generate-doc')} title="AI 生成文档">📝</button>
+      <button class="ai-toolbar-btn" onclick={() => aiAction('explain')} title={$t('editor.ai.explain')}>💡</button>
+      <button class="ai-toolbar-btn" onclick={() => aiAction('refactor')} title={$t('editor.ai.refactor')}>🔧</button>
+      <button class="ai-toolbar-btn" onclick={() => aiAction('generate-test')} title={$t('editor.ai.test')}>🧪</button>
+      <button class="ai-toolbar-btn" onclick={() => aiAction('generate-doc')} title={$t('editor.ai.doc')}>📝</button>
     </div>
   {/if}
 </div>

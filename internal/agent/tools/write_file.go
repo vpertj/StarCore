@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"StarCore/internal/agent"
@@ -44,13 +45,13 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) (strin
 		return "", fmt.Errorf("content is required")
 	}
 
-	if SandboxConfig != nil {
-		if err := SandboxConfig.ValidatePath(path); err != nil {
+	if cfg := GetSandboxConfig(); cfg != nil {
+		if err := cfg.ValidatePath(path); err != nil {
 			return "", fmt.Errorf("path validation failed: %w", err)
 		}
 	}
 
-	// Read old content before overwriting (for diff)
+	// Read old content before overwriting (for diff) — do this BEFORE atomic write
 	oldData, readErr := os.ReadFile(path)
 	var oldContent string
 	existed := readErr == nil
@@ -58,21 +59,62 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) (strin
 		oldContent = string(oldData)
 	}
 
-	err := os.WriteFile(path, []byte(content), 0644)
+	// Atomic write: write to temp file in same dir, then rename
+	dir := filepath.Dir(path)
+	tmpFile, err := os.CreateTemp(dir, ".starcore-write-*")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+
+	// Write content to temp file
+	if _, err := tmpFile.WriteString(content); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("failed to write temp file: %w", err)
+	}
+	if err := tmpFile.Chmod(0644); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("failed to set permissions: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("failed to close temp file: %w", err)
+	}
+
+	// Atomic rename (same filesystem — safe because tmp is in same dir as target)
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("failed to atomically replace file: %w", err)
 	}
 
 	// Build informative result message
 	oldLines := strings.Count(oldContent, "\n") + 1
 	newLines := strings.Count(content, "\n") + 1
+
+	var resultMsg string
 	if !existed {
-		return fmt.Sprintf("✅ Created %s (%d lines, %d bytes)", path, newLines, len(content)), nil
+		resultMsg = fmt.Sprintf("✅ Created %s (%d lines, %d bytes)", path, newLines, len(content))
+	} else if oldContent == content {
+		resultMsg = fmt.Sprintf("⏭️ %s unchanged", path)
+	} else {
+		diffLines := newLines - oldLines
+		diffStr := fmt.Sprintf("%+d", diffLines)
+		resultMsg = fmt.Sprintf("✏️ Modified %s: %d→%d lines (%s), %d→%d bytes", path, oldLines, newLines, diffStr, len(oldContent), len(content))
 	}
-	if oldContent == content {
-		return fmt.Sprintf("⏭️ %s unchanged", path), nil
+
+	// Quick post-write syntax check
+	if syntaxErr := QuickSyntaxCheck(path); syntaxErr != "" {
+		resultMsg += "\n" + syntaxErr
 	}
-	diffLines := newLines - oldLines
-	diffStr := fmt.Sprintf("%+d", diffLines)
-	return fmt.Sprintf("✏️ Modified %s: %d→%d lines (%s), %d→%d bytes", path, oldLines, newLines, diffStr, len(oldContent), len(content)), nil
+
+	// File modification rate limit check
+	if ls := loopStateRef.Load(); ls != nil {
+		if rateMsg := ls.CheckFileRateLimit(path); rateMsg != "" {
+			resultMsg += "\n" + rateMsg
+		}
+	}
+
+	return resultMsg, nil
 }

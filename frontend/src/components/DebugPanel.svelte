@@ -134,7 +134,7 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
         </svg>
         <p class="text-xs text-center" style="color: var(--text-muted);">{$t('debug.noSession')}</p>
-        <button class="px-3 py-1.5 text-xs rounded font-medium" style="background-color: var(--success); color: var(--text-on-accent);" onclick={handleStartDebug}>
+        <button class="btn btn-success" onclick={handleStartDebug}>
           {$t('debug.startDebugging')}
         </button>
       </div>
@@ -177,8 +177,8 @@
             style="background-color: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border);"
             onkeydown={(e) => { if (e.key === 'Enter') handleWatchSubmit() }}
           />
-          <button class="px-2 py-1 rounded text-[10px]" style="background-color: var(--accent); color: var(--text-on-accent);" onclick={handleWatchSubmit}>{$t('debug.add')}</button>
-          <button class="px-2 py-1 rounded text-[10px]" style="background-color: var(--bg-tertiary); color: var(--text-secondary);" onclick={refreshWatches}>{$t('debug.refresh')}</button>
+          <button class="btn btn-primary btn-sm" onclick={handleWatchSubmit}>{$t('debug.add')}</button>
+          <button class="btn btn-secondary btn-sm" onclick={refreshWatches}>{$t('debug.refresh')}</button>
         </div>
       </div>
       {#each $watchExpressions as watch, i}

@@ -1,6 +1,7 @@
 <script>
 import { onMount } from 'svelte'
 import { mcpServers, mcpServerStatuses, loadMCPServers, addMCPServer, removeMCPServer, startMCPServer, stopMCPServer, enableMCPServer } from '../stores/mcp.js'
+import { t } from '../stores/i18n.js'
 
 let showForm = false
 let editMode = false
@@ -64,33 +65,33 @@ async function handleAdd() {
 
 <div class="space-y-3">
   <div>
-    <p class="text-xs" style="color: var(--text-secondary);">MCP 服务器为 AI 提供额外工具。默认模板需安装对应运行时（npx=Node.js, uvx=Python uv）。点击"编辑"可修改命令和参数。删掉不需要的模板即可。</p>
+    <p class="text-xs" style="color: var(--text-secondary);">{$t('settings.mcpDescription')}</p>
   </div>
   <div class="flex items-center justify-between">
     <h3 class="text-sm font-medium" style="color: var(--text-primary);">服务器列表</h3>
-    <button class="px-2 py-1 rounded text-xs" style="background-color: var(--accent); color: #fff;" onclick={() => { resetForm(); showForm = true }}>
-      {showForm ? '关闭' : '+ 添加'}
+    <button class="btn btn-primary btn-sm" onclick={() => { resetForm(); showForm = true }}>
+      {showForm ? $t('settings.mcpClose') : '+ ' + $t('settings.mcpAdd')}
     </button>
   </div>
 
   {#if showForm}
     <div class="p-3 rounded space-y-2" style="background-color: var(--bg-primary); border: 1px solid var(--border);">
       <div class="text-xs font-medium mb-1" style="color: var(--accent);">{editMode ? '编辑 ' + editId : '添加新服务器'}</div>
-      <input bind:value={newId} placeholder="ID (英文)" class="w-full px-3 py-1.5 rounded border text-sm" style="background-color: var(--bg-secondary); color: var(--text-primary); border-color: var(--border);" disabled={editMode}>
-      <input bind:value={newName} placeholder="名称" class="w-full px-3 py-1.5 rounded border text-sm" style="background-color: var(--bg-secondary); color: var(--text-primary); border-color: var(--border);">
-      <input bind:value={newCommand} placeholder="命令 (如 npx)" class="w-full px-3 py-1.5 rounded border text-sm" style="background-color: var(--bg-secondary); color: var(--text-primary); border-color: var(--border);">
-      <input bind:value={newArgs} placeholder="参数 (空格分隔)" class="w-full px-3 py-1.5 rounded border text-sm" style="background-color: var(--bg-secondary); color: var(--text-primary); border-color: var(--border);">
+      <input bind:value={newId} placeholder={$t('settings.mcpId')} class="w-full px-3 py-1.5 rounded border text-sm" style="background-color: var(--bg-secondary); color: var(--text-primary); border-color: var(--border);" disabled={editMode}>
+      <input bind:value={newName} placeholder={$t('settings.mcpName')} class="w-full px-3 py-1.5 rounded border text-sm" style="background-color: var(--bg-secondary); color: var(--text-primary); border-color: var(--border);">
+      <input bind:value={newCommand} placeholder={$t('settings.mcpCommand')} class="w-full px-3 py-1.5 rounded border text-sm" style="background-color: var(--bg-secondary); color: var(--text-primary); border-color: var(--border);">
+      <input bind:value={newArgs} placeholder={$t('settings.mcpArgs')} class="w-full px-3 py-1.5 rounded border text-sm" style="background-color: var(--bg-secondary); color: var(--text-primary); border-color: var(--border);">
       <select bind:value={newTransport} class="w-full px-3 py-1.5 rounded border text-sm" style="background-color: var(--bg-secondary); color: var(--text-primary); border-color: var(--border);">
         <option value="stdio">stdio</option>
         <option value="sse">SSE</option>
       </select>
       {#if newTransport === 'sse'}
-        <input bind:value={newEndpoint} placeholder="SSE 端点 URL" class="w-full px-3 py-1.5 rounded border text-sm" style="background-color: var(--bg-secondary); color: var(--text-primary); border-color: var(--border);">
+        <input bind:value={newEndpoint} placeholder={$t('settings.mcpSSE')} class="w-full px-3 py-1.5 rounded border text-sm" style="background-color: var(--bg-secondary); color: var(--text-primary); border-color: var(--border);">
       {/if}
-      <textarea bind:value={newEnv} placeholder="环境变量 (KEY=VALUE, 每行一个)" class="w-full px-3 py-1.5 rounded border text-sm" style="background-color: var(--bg-secondary); color: var(--text-primary); border-color: var(--border); min-height: 60px;" rows="3"></textarea>
+      <textarea bind:value={newEnv} placeholder={$t('settings.mcpEnv')} class="w-full px-3 py-1.5 rounded border text-sm" style="background-color: var(--bg-secondary); color: var(--text-primary); border-color: var(--border); min-height: 60px;" rows="3"></textarea>
       <div class="flex gap-2">
-        <button class="flex-1 px-3 py-1.5 rounded text-sm" style="background-color: var(--border); color: var(--text-primary);" onclick={resetForm}>取消</button>
-        <button class="flex-1 px-3 py-1.5 rounded text-sm font-medium" style="background-color: var(--accent); color: #fff;" onclick={handleAdd}>{editMode ? '保存修改' : '添加'}</button>
+        <button class="flex-1 btn btn-secondary" onclick={resetForm}>{$t('settings.mcpCancel')}</button>
+        <button class="flex-1 btn btn-primary" onclick={handleAdd}>{editMode ? $t('settings.mcpSave') : $t('settings.mcpAdd')}</button>
       </div>
     </div>
   {/if}
@@ -109,14 +110,14 @@ async function handleAdd() {
         </div>
         <div class="flex items-center gap-1">
           {#if status === 'running'}
-            <button class="px-2 py-1 rounded text-xs" style="color: #e5c07b;" onclick={() => stopMCPServer(server.id)}>停止</button>
+            <button class="btn btn-sm" style="color: #e5c07b;" onclick={() => stopMCPServer(server.id)}>停止</button>
           {:else if status === 'disabled' || !server.enabled}
-            <button class="px-2 py-1 rounded text-xs" style="color: var(--text-primary); background-color: var(--border);" onclick={() => enableMCPServer(server.id)}>启用</button>
+            <button class="btn btn-secondary btn-sm" onclick={() => enableMCPServer(server.id)}>启用</button>
           {:else}
-            <button class="px-2 py-1 rounded text-xs" style="color: var(--text-primary); background-color: var(--border);" onclick={() => startMCPServer(server.id)}>启动</button>
+            <button class="btn btn-secondary btn-sm" onclick={() => startMCPServer(server.id)}>启动</button>
           {/if}
-          <button class="px-2 py-1 rounded text-xs" style="color: var(--accent);" onclick={() => editServer(server)}>编辑</button>
-          <button class="px-2 py-1 rounded text-xs" style="color: #d73a49;" onclick={() => { if (confirm('确定删除？')) removeMCPServer(server.id) }}>删除</button>
+          <button class="btn btn-accent-ghost btn-sm" onclick={() => editServer(server)}>{$t('settings.mcpEdit')}</button>
+          <button class="btn btn-danger-ghost btn-sm" onclick={() => { if (window.confirm($t('settings.mcpConfirmDelete'))) removeMCPServer(server.id) }}>{$t('settings.mcpDelete')}</button>
         </div>
       </div>
       {#if errMsg}

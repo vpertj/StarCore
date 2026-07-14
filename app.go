@@ -11,7 +11,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"StarCore/internal/agent"
@@ -108,6 +110,7 @@ type App struct {
 	sandboxConfigs map[string]*sandbox.Config
 	activeProject  string
 	openProjects   []string
+	mu             sync.RWMutex // protects fileWatchers, sandboxConfigs, activeProject, openProjects
 
 	aiService      *ai.Service
 	contextBuilder *ictx.Builder
@@ -192,6 +195,7 @@ func NewApp() *App {
 	toolExec.Register(agentTools.NewSkillTool())
 	toolExec.Register(agentTools.NewSubAgentTool())
 	agentTools.SubAgentMemoryStore = memStore
+	agentTools.LSPManager = lspMgr
 
 	app.providerMgr = mgr
 	app.agentReg = reg
@@ -226,6 +230,16 @@ func NewApp() *App {
 		func() context.Context { return app.ctx },
 		app.autoVerify,
 	)
+	app.aiService.SetFileHistorySavePath(dataDir)
+
+	// Phase 6+: Initialize SQLite trace storage (shares DB with memory store)
+	if memStore != nil {
+		if traceSink, err := ai.NewSQLiteTraceSink(memStore.DB()); err != nil {
+			log.Printf("Warning: trace storage unavailable: %v", err)
+		} else {
+			app.aiService.SetTraceSink(traceSink)
+		}
+	}
 
 	app.pipelineExec = pipeline.NewExecutor(mgr, toolExec, reg, memStore, app.emit)
 	app.completionSvc = completion.NewService(mgr)
@@ -327,6 +341,16 @@ func (a *App) shutdown(ctx context.Context) {
 	if a.mcpMgr != nil {
 		a.mcpMgr.StopAll()
 	}
+
+	// Close memory store to prevent connection leak
+	if a.memoryStore != nil {
+		if err := a.memoryStore.Close(); err != nil {
+			log.Printf("Error closing memory store: %v", err)
+		}
+	}
+
+	// Close audit logger to prevent file handle leak
+	sandbox.CloseAuditLogger()
 }
 
 // IsProviderConfigured checks if any AI provider has been set up.
@@ -344,6 +368,9 @@ func (a *App) SetProjectPath(path string) {
 	if path == "" {
 		return
 	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
 	// Add to open projects if not already present
 	found := false
 	for _, p := range a.openProjects {
@@ -367,7 +394,7 @@ func (a *App) SetProjectPath(path string) {
 	// Set sandbox config for this project
 	cfg := sandbox.DefaultConfig(path)
 	a.sandboxConfigs[path] = cfg
-	agentTools.SandboxConfig = cfg
+	agentTools.SetSandboxConfig(cfg)
 
 	a.activeProject = path
 	a.verifySvc.SetProjectDir(path)
@@ -393,9 +420,12 @@ func (a *App) SetActiveWorkspaceRoot(path string) {
 
 // SwitchProject changes the active project without destroying others.
 func (a *App) SwitchProject(path string) {
+	a.mu.Lock()
 	a.activeProject = path
-	if cfg, ok := a.sandboxConfigs[path]; ok {
-		agentTools.SandboxConfig = cfg
+	cfg := a.sandboxConfigs[path]
+	a.mu.Unlock()
+	if cfg != nil {
+		agentTools.SetSandboxConfig(cfg)
 	}
 	a.verifySvc.SetProjectDir(path)
 	a.lspMgr.SetRootPath(path)
@@ -857,6 +887,16 @@ func (a *App) CanRedoFileChange() bool {
 	return a.aiService.CanRedoFileChange()
 }
 
+// GetTraces returns trace headers for a conversation (most recent first).
+func (a *App) GetTraces(convID string, limit int) ([]ai.TraceHeader, error) {
+	return a.aiService.GetTraces(convID, limit)
+}
+
+// GetTraceEvents returns all events for a given trace.
+func (a *App) GetTraceEvents(traceID string) ([]ai.TraceEvent, error) {
+	return a.aiService.GetTraceEvents(traceID)
+}
+
 // ContinueAgentLoop adds extra iterations to the running agent loop.
 func (a *App) ContinueAgentLoop(extraLoops int) {
 	a.aiService.ContinueLoop(extraLoops)
@@ -1081,14 +1121,12 @@ func (a *App) DeleteMessage(id string) error {
 	return a.memoryStore.DeleteMessage(id)
 }
 
-// DeleteConversationMessages deletes all messages for a conversation (localStorage cleanup helper).
+// DeleteConversationMessages deletes all messages for a conversation.
 func (a *App) DeleteConversationMessages(convID string) error {
 	if a.memoryStore == nil {
 		return nil
 	}
-	// Messages are cascade-deleted with DeleteConversation; this is a no-op for SQLite.
-	// Exists for API symmetry with frontend cleanup of localStorage.
-	return nil
+	return a.memoryStore.DeleteConversationMessages(convID)
 }
 
 // GetKnowledge returns knowledge entries for a project.
@@ -1446,7 +1484,12 @@ func (a *App) CheckCommandExists(command string) bool {
 	if lsp.FindLocalBin(command) != "" {
 		return true
 	}
-	_, err := a.fileService.ExecuteCommand(fmt.Sprintf("where %s 2>nul || which %s 2>/dev/null", command, command))
+	// Sanitize: only allow alphanumeric, hyphen, underscore, dot (safe for binary names)
+	sanitized := regexp.MustCompile(`[^a-zA-Z0-9._\-]`).ReplaceAllString(command, "")
+	if sanitized == "" {
+		return false
+	}
+	_, err := a.fileService.ExecuteCommand(fmt.Sprintf("where %s 2>nul || which %s 2>/dev/null", sanitized, sanitized))
 	return err == nil
 }
 

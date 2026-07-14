@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -18,7 +19,7 @@ import (
 
 const maxCommandOutput = 8000
 
-var SandboxConfig *sandbox.Config
+var sandboxConfigPtr atomic.Pointer[sandbox.Config]
 
 type ExecuteCommandTool struct{}
 
@@ -54,8 +55,8 @@ func (t *ExecuteCommandTool) Execute(ctx context.Context, args map[string]any) (
 	cwd, _ := args["cwd"].(string)
 	cwd = strings.TrimSpace(cwd)
 	if cwd == "" {
-		if LoopStateRef != nil {
-			if paths := LoopStateRef.GetFilesTouched(); len(paths) > 0 {
+		if ls := loopStateRef.Load(); ls != nil {
+			if paths := ls.GetFilesTouched(); len(paths) > 0 {
 				cwd = filepath.Dir(paths[0])
 			}
 		}
@@ -64,8 +65,8 @@ func (t *ExecuteCommandTool) Execute(ctx context.Context, args map[string]any) (
 		cwd = "."
 	}
 
-	if SandboxConfig != nil {
-		if err := SandboxConfig.ValidateCommand(command, cwd); err != nil {
+	if cfg := sandboxConfigPtr.Load(); cfg != nil {
+		if err := cfg.ValidateCommand(command, cwd); err != nil {
 			return "", fmt.Errorf("sandbox: %w", err)
 		}
 	}
@@ -170,4 +171,14 @@ func (t *ExecuteCommandTool) Execute(ctx context.Context, args map[string]any) (
 	}
 
 	return outStr, nil
+}
+
+// SetSandboxConfig sets the sandbox config for command validation (thread-safe).
+func SetSandboxConfig(cfg *sandbox.Config) {
+	sandboxConfigPtr.Store(cfg)
+}
+
+// GetSandboxConfig returns the current sandbox config (thread-safe).
+func GetSandboxConfig() *sandbox.Config {
+	return sandboxConfigPtr.Load()
 }

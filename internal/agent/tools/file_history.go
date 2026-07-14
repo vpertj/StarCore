@@ -1,7 +1,9 @@
 package tools
 
 import (
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -16,22 +18,83 @@ type FileChange struct {
 	Description string    `json:"description"`
 }
 
+// PersistedHistory is the on-disk format for file history.
+type PersistedHistory struct {
+	Changes []FileChange `json:"changes"`
+	Pos     int          `json:"pos"`
+}
+
 // FileHistory tracks file changes within a session for undo/redo.
 type FileHistory struct {
-	mu      sync.Mutex
-	changes []FileChange
-	pos     int // current position in history
+	mu         sync.Mutex
+	changes    []FileChange
+	pos        int // current position in history
+	savePath   string
+	maxChanges int // maximum history entries to keep
 }
 
 // NewFileHistory creates a new file history tracker.
 func NewFileHistory() *FileHistory {
 	return &FileHistory{
-		changes: make([]FileChange, 0),
-		pos:     -1,
+		changes:    make([]FileChange, 0),
+		pos:        -1,
+		maxChanges: 50,
 	}
 }
 
-// Record records a file change.
+// SetSavePath sets the file path for persisting history to disk.
+func (h *FileHistory) SetSavePath(dir string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.savePath = filepath.Join(dir, "file_history.json")
+}
+
+// Save persists the current history to disk.
+func (h *FileHistory) Save() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if h.savePath == "" {
+		return
+	}
+
+	data := PersistedHistory{
+		Changes: h.changes,
+		Pos:     h.pos,
+	}
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return
+	}
+	os.MkdirAll(filepath.Dir(h.savePath), 0755)
+	os.WriteFile(h.savePath, jsonData, 0644)
+}
+
+// Load restores history from disk. Returns true if history was loaded.
+func (h *FileHistory) Load() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if h.savePath == "" {
+		return false
+	}
+
+	data, err := os.ReadFile(h.savePath)
+	if err != nil {
+		return false
+	}
+
+	var persisted PersistedHistory
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		return false
+	}
+
+	h.changes = persisted.Changes
+	h.pos = persisted.Pos
+	return true
+}
+
+// Record records a file change and auto-saves.
 func (h *FileHistory) Record(filePath, oldContent, newContent, operation, description string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -49,7 +112,28 @@ func (h *FileHistory) Record(filePath, oldContent, newContent, operation, descri
 		Timestamp:   time.Now(),
 		Description: description,
 	})
+	// Trim oldest entries if exceeding max
+	if len(h.changes) > h.maxChanges {
+		h.changes = h.changes[len(h.changes)-h.maxChanges:]
+	}
 	h.pos = len(h.changes) - 1
+
+	// Auto-save on each change
+	h.saveUnlocked()
+}
+
+// saveUnlocked saves without acquiring the lock (caller must hold mu).
+func (h *FileHistory) saveUnlocked() {
+	if h.savePath == "" {
+		return
+	}
+	data := PersistedHistory{Changes: h.changes, Pos: h.pos}
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return
+	}
+	os.MkdirAll(filepath.Dir(h.savePath), 0755)
+	os.WriteFile(h.savePath, jsonData, 0644)
 }
 
 // Undo reverts the last change and returns the change that was undone.

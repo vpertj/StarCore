@@ -61,15 +61,33 @@ func buildDefaultRoutingRules() []routingRule {
 		},
 		{
 			intentKeywords: []string{"解释", "分析", "理解", "explain", "analyze", "understand", "what"},
-			primaryTool:    "read_file",
-			fallbackTools:  []string{"search_files"},
-			hintTemplate:   "用户要求解释代码。请先使用 read_file 读取相关文件，然后分析解释。",
+			primaryTool:    "lsp_symbols",
+			fallbackTools:  []string{"read_file", "search_files"},
+			hintTemplate:   "用户要求解释代码。请先用 lsp_symbols 获取文件大纲，再用 read_file 读取关键部分。",
 		},
 		{
 			intentKeywords: []string{"修复", "bug", "错误", "报错", "fix", "debug", "error"},
-			primaryTool:    "read_file",
-			fallbackTools:  []string{"search_files", "get_diagnostics"},
-			hintTemplate:   "用户要求修复 bug。请先读取相关文件和错误信息，分析根因，然后使用 edit_file 修复。",
+			primaryTool:    "get_diagnostics",
+			fallbackTools:  []string{"read_file", "search_files", "lsp_references"},
+			hintTemplate:   "用户要求修复 bug。请先用 get_diagnostics 获取错误信息，然后用 lsp_references 查找相关引用，最后用 edit_file 修复。",
+		},
+		{
+			intentKeywords: []string{"定义", "跳转", "declaration", "definition", "goto"},
+			primaryTool:    "lsp_definition",
+			fallbackTools:  []string{"search_files"},
+			hintTemplate:   "用户要求跳转到定义。请使用 lsp_definition 工具。",
+		},
+		{
+			intentKeywords: []string{"引用", "谁调用", "哪里用", "reference", "usages", "called by"},
+			primaryTool:    "lsp_references",
+			fallbackTools:  []string{"search_files"},
+			hintTemplate:   "用户要求查找引用。请使用 lsp_references 工具。",
+		},
+		{
+			intentKeywords: []string{"大纲", "结构", "概览", "outline", "structure", "overview"},
+			primaryTool:    "lsp_symbols",
+			fallbackTools:  []string{"read_file"},
+			hintTemplate:   "用户要求查看文件结构。请使用 lsp_symbols 工具获取大纲。",
 		},
 	}
 }
@@ -101,7 +119,10 @@ func BuildToolMappingHint() string {
 - 运行命令 → execute_command
 - 搜索内容 → search_files（内容搜索）或 glob_files（文件名搜索）
 - 查看文件 → read_file
-- 修复 bug → read_file → 分析 → edit_file
+- 修复 bug → get_diagnostics → lsp_references → edit_file
+- 跳转定义 → lsp_definition
+- 查找引用 → lsp_references
+- 查看大纲 → lsp_symbols
 - Git 操作 → get_git_diff / git_commit / git_pull / git_push
 `
 }

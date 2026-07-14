@@ -565,7 +565,7 @@
   </div>
 
   <div class="flex justify-end pt-2">
-    <button class="px-4 py-2 rounded text-sm font-medium transition-colors" style="background-color: var(--accent); color: #ffffff;" onclick={() => openEditProvider("")}>
+    <button class="btn btn-primary" onclick={() => openEditProvider("")}>
       + 添加供应商
     </button>
   </div>
@@ -826,19 +826,8 @@
         {/if}
       </div>
       <div class="flex justify-end gap-3 pt-3 border-t shrink-0" style="border-color: var(--border);">
-        <button
-          class="px-4 py-2 rounded text-sm"
-          style="background-color: var(--border); color: var(--text-primary);"
-          onclick={() => (showAddModelDialog = false)}
-          >{$t("settings.cancel")}</button
-        >
-        <button
-          class="px-4 py-2 rounded text-sm font-medium"
-          style="background-color: var(--accent); color: #ffffff;"
-          onclick={saveAllSelectedModels}
-          disabled={selectedModelsToAdd.length === 0}
-          >{$t("settings.ai.addModel") || "添加模型"}</button
-        >
+        <button class="btn btn-secondary" onclick={() => (showAddModelDialog = false)}>{$t("settings.cancel")}</button>
+        <button class="btn btn-primary" onclick={saveAllSelectedModels} disabled={selectedModelsToAdd.length === 0}>{$t("settings.ai.addModel") || "添加模型"}</button>
       </div>
     </div>
   </div>
@@ -989,18 +978,11 @@
             <label class="block text-xs mb-1.5 font-medium" style="color: var(--text-secondary);">模型名称</label>
             <input type="text" bind:value={editManualModelName} placeholder="可选" class="w-full px-3 py-2 rounded border text-sm" style="background-color: var(--bg-secondary); color: var(--text-primary); border-color: var(--border);" />
           </div>
-          <button class="px-3 py-2 rounded text-xs font-medium shrink-0" style="background-color: #2ea043; color: #fff;" onclick={editAddManualModel}>添加</button>
+          <button class="btn btn-success btn-sm" onclick={editAddManualModel}>添加</button>
         </div>
         <div class="flex gap-2">
-          <button
-            class="flex-1 px-3 py-1.5 rounded text-xs font-medium transition-colors"
-            style="background-color: #094771; color: #ffffff;"
-            onclick={editFetchModelsFromAPI}
-            disabled={editFetchingModels || (!editApiKey && !editEndpoint)}
-          >
-            {#if editFetchingModels}{$t("settings.ai.fetching") ||
-                "获取中..."}{:else}{$t("settings.ai.fetchModels") ||
-                "获取模型列表"}{/if}
+          <button class="flex-1 btn btn-primary btn-sm" onclick={editFetchModelsFromAPI} disabled={editFetchingModels || (!editApiKey && !editEndpoint)}>
+            {#if editFetchingModels}{$t("settings.ai.fetching") || "获取中..."}{:else}{$t("settings.ai.fetchModels") || "获取模型列表"}{/if}
           </button>
         </div>
         {#if editFetchError}<p class="text-xs" style="color: #f14c4c;">
@@ -1063,37 +1045,20 @@
             </span>
           {/if}
           {#if editProviderId.startsWith("custom_")}
-            <button class="px-3 py-1.5 rounded text-xs font-medium" style="background-color: #f14c4c; color: #fff;" onclick={() => {
-              if (confirm('确定要删除此供应商及其所有模型吗？')) {
+            <button class="btn btn-danger btn-sm" onclick={() => {
+              if (window.confirm('确定要删除此供应商及其所有模型吗？')) {
                 const models = (get(customModels) || []).filter(m => (m.groupId || m.id.split(':')[0] || m.providerId) !== editProviderId);
         saveCustomModels(models).catch(e => console.error('save failed:', e));
                 showEditProviderDialog = false;
               }
             }}>删除供应商</button>
           {/if}
-          <button
-            class="px-3 py-1.5 rounded text-xs font-medium transition-colors"
-            style="background-color: #094771; color: #ffffff;"
-            onclick={editTestConnection}
-            disabled={editTesting}
-          >
+          <button class="btn btn-primary btn-sm" onclick={editTestConnection} disabled={editTesting}>
             {editTesting ? "测试中..." : "测试连接"}
           </button>
-          <button
-            class="px-4 py-2 rounded text-sm"
-            style="background-color: var(--border); color: var(--text-primary);"
-            onclick={() => {
-              pendingEditModels = [];
-              showEditProviderDialog = false;
-            }}
-            >{$t("settings.cancel")}</button
-          >
-          <button
-            class="px-4 py-2 rounded text-sm font-medium"
-            style="background-color: var(--accent); color: #ffffff;"
-            disabled={editAllModels.length === 0 && !editProviderName && !editApiKey}
-            onclick={async () => {
-              if (!editProviderName && editAllModels.length === 0) { alert('请先填写供应商名称并添加至少一个模型'); return; }
+          <button class="btn btn-secondary" onclick={() => { pendingEditModels = []; showEditProviderDialog = false; }}>{$t("settings.cancel")}</button>
+          <button class="btn btn-primary" disabled={editAllModels.length === 0 && !editProviderName && !editApiKey} onclick={async () => {
+              if (!editProviderName && editAllModels.length === 0) { window.alert('请先填写供应商名称并添加至少一个模型'); return; }
               const isBuiltin = builtinProviders.some(bp => bp.id === editProviderId);
               const groupId = isBuiltin ? editProviderId : editProviderId;
               const backendPid = editProviderType === "anthropic" ? "anthropic" : editProviderType === "ollama" ? "ollama" : "openai";
@@ -1106,7 +1071,7 @@
                   enabled: true,
                 });
               } catch (e) {
-                alert('保存供应商配置失败: ' + (e.message || e));
+                window.alert('保存供应商配置失败: ' + (e.message || e));
                 return;
               }
 
@@ -1169,7 +1134,7 @@
                 pendingEditModels = [];
                 showEditProviderDialog = false;
               } catch (e) {
-                alert('保存模型失败: ' + (e.message || e));
+                window.alert('保存模型失败: ' + (e.message || e));
               }
             }}>{$t("settings.save")}</button
           >

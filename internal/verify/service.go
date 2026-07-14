@@ -79,14 +79,31 @@ func (s *Service) SetProjectDir(dir string) {
 func (s *Service) Verify(ctx context.Context, filePaths []string) *VerificationResult {
 	result := &VerificationResult{AllPassed: true}
 
-	lang := s.detectProjectLanguage()
-	checks := s.getChecksForLanguage(lang, filePaths)
+	// Detect language(s) from modified files first, fall back to project indicators
+	langs := s.detectLanguagesFromFiles(filePaths)
+	if len(langs) == 0 {
+		lang := s.detectProjectLanguage()
+		if lang != "unknown" {
+			langs = append(langs, lang)
+		}
+	}
+	if len(langs) == 0 {
+		langs = append(langs, "unknown")
+	}
 
-	for _, check := range checks {
-		cr := s.runCheck(ctx, check)
-		result.Checks = append(result.Checks, cr)
-		if !cr.Passed {
-			result.AllPassed = false
+	seen := make(map[string]bool)
+	for _, lang := range langs {
+		if seen[lang] {
+			continue
+		}
+		seen[lang] = true
+		checks := s.getChecksForLanguage(lang, filePaths)
+		for _, check := range checks {
+			cr := s.runCheck(ctx, check)
+			result.Checks = append(result.Checks, cr)
+			if !cr.Passed {
+				result.AllPassed = false
+			}
 		}
 	}
 
@@ -614,4 +631,22 @@ func (s *Service) detectLanguageFromFile(filePath string) string {
 	default:
 		return "unknown"
 	}
+}
+
+// detectLanguagesFromFiles returns unique languages detected from file extensions.
+// Falls back to project-level detection if no files provided.
+func (s *Service) detectLanguagesFromFiles(filePaths []string) []string {
+	if len(filePaths) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var langs []string
+	for _, fp := range filePaths {
+		lang := s.detectLanguageFromFile(fp)
+		if lang != "unknown" && !seen[lang] {
+			seen[lang] = true
+			langs = append(langs, lang)
+		}
+	}
+	return langs
 }

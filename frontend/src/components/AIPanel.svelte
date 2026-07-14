@@ -6,8 +6,10 @@
   import ContextPreview from './ContextPreview.svelte'
   import DiffViewer from './DiffViewer.svelte'
   import MultiFileDiffViewer from './MultiFileDiffViewer.svelte'
+  import PipelineProgress from './PipelineProgress.svelte'
+  import TraceViewer from './TraceViewer.svelte'
   import { pendingDiff, diffVisible, applyDiff, dismissDiff, showDiffForFile, multiDiffVisible } from '../stores/diffPreview.js'
-    import { messages, isGenerating, sendMessage, addMessage, clearMessages, thinkingContent, contextFiles, stopGenerating, toolCalls, approveToolCall, rejectToolCall, selectedCode, activeFileContent, detectTaskType, classifyError, retryLastMessage, pendingAsk, persistMessages, loopExhausted, continueLoop } from '../stores/ai.js'
+    import { messages, isGenerating, sendMessage, addMessage, clearMessages, thinkingContent, contextFiles, stopGenerating, toolCalls, approveToolCall, rejectToolCall, selectedCode, activeFileContent, detectTaskType, classifyError, retryLastMessage, pendingAsk, persistMessages, loopExhausted, continueLoop, dagPlan, showTraceViewer, openTraceViewer, loadTraces } from '../stores/ai.js'
    import { get } from 'svelte/store'
   import { skills, executeSkill, isSkillExecuting, skillResult, executingSkillId, clearSkillResult, loadSkills } from '../stores/skill.js'
   import { activeProviderId, activeModelId, allAvailableModels, builtinProviders, loadModels } from '../stores/provider.js'
@@ -612,6 +614,11 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
           {/each}
         {/if}
 
+        <!-- DAG Pipeline progress -->
+        {#if $dagPlan}
+          <PipelineProgress plan={$dagPlan} />
+        {/if}
+
         {#if $messages.length > 0}
         {#each $messages as message, msgIdx}
           {#if message.role === 'tool'}
@@ -995,7 +1002,7 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
           <textarea
             bind:this={textareaEl}
             bind:value={inputValue}
-            placeholder={$isGenerating ? 'AI 思考中...' : currentSkill ? '描述你的需求...' : $t('ai.panel.placeholder')}
+            placeholder={$isGenerating ? $t('ai.placeholder.thinking') : currentSkill ? $t('ai.placeholder.skill') : $t('ai.panel.placeholder')}
             class="flex-1 px-3 py-2 text-sm resize-none border-none outline-none placeholder-green"
             style="background-color: transparent; color: var(--text-primary); min-height: 36px; max-height: 120px;"
             rows="1"
@@ -1082,6 +1089,9 @@ function closeDropdowns(e) { const target = /** @type {HTMLElement|null} */ (e.t
     </div>
   </div>
 </div>
+
+<!-- Trace Viewer overlay -->
+<TraceViewer />
 
 <style>
 .ai-panel-container {

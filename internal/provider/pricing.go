@@ -33,8 +33,8 @@ var PricingTable = map[string]ModelPricing{
 	"claude-3-haiku":    {InputPer1K: 0.00025, OutputPer1K: 0.00125, CachedDiscount: 0.9},
 
 	// DeepSeek models
-	"deepseek-v3":  {InputPer1K: 0.00027, OutputPer1K: 0.0011, CachedDiscount: 0.5},
-	"deepseek-r1":  {InputPer1K: 0.00055, OutputPer1K: 0.00219, CachedDiscount: 0.5},
+	"deepseek-v3": {InputPer1K: 0.00027, OutputPer1K: 0.0011, CachedDiscount: 0.5},
+	"deepseek-r1": {InputPer1K: 0.00055, OutputPer1K: 0.00219, CachedDiscount: 0.5},
 }
 
 // FindPricing finds the pricing for a model by matching against the pricing table.
